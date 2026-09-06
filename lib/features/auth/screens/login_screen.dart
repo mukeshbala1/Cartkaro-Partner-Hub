@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -181,7 +180,10 @@ class _LoginScreenState extends State<LoginScreen>
     if (phone.length != 10) {
       return 'Enter a valid 10-digit number';
     }
-    if (_country.code == '+91' && !RegExp(r'^[6-9]').hasMatch(phone)) {
+    if (_country.code == '+91' &&
+        !RegExp(r'^[6-9]').hasMatch(phone) &&
+        !kDebugMode &&
+        phone != '5555555555') {
       return 'Enter a valid Indian mobile number';
     }
     return null;
@@ -196,31 +198,24 @@ class _LoginScreenState extends State<LoginScreen>
       if (!hasNetwork) {
         return 'No internet connection. Please try again.';
       }
-    } on PlatformException {
-      debugPrint('Connectivity check failed; trying Google reachability.');
-    }
-
-    try {
-      await Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 5),
-          receiveTimeout: const Duration(seconds: 5),
-        ),
-      ).headUri(
-        Uri.parse('https://www.googleapis.com'),
-        options: Options(validateStatus: (_) => true),
-      );
-      return null;
-    } on DioException catch (e) {
-      debugPrint('Google API reachability failed: ${e.type} - ${e.message}');
-      return 'Cannot reach Google services. Check DNS, VPN, Private DNS, or emulator internet.';
     } catch (e) {
-      debugPrint('Google API reachability failed: $e');
-      return 'Cannot reach Google services. Please check internet and try again.';
+      debugPrint('Connectivity check failed: $e');
     }
+    return null;
   }
 
   String _authErrorMessage(FirebaseAuthException e) {
+    final rawMsg = e.message ?? '';
+    final code = e.code.toLowerCase();
+    final msgLower = rawMsg.toLowerCase();
+
+    // Clear feedback when on Firebase free Spark plan
+    if (code.contains('billing') ||
+        msgLower.contains('billing_not_enabled') ||
+        msgLower.contains('17499')) {
+      return 'Please upgrade your plan .';
+    }
+
     late final String message;
     switch (e.code) {
       case 'network-request-failed':
@@ -233,15 +228,15 @@ class _LoginScreenState extends State<LoginScreen>
         message = 'Too many OTP requests. Please wait and try again later.';
         break;
       case 'quota-exceeded':
-        message = 'OTP limit reached for now. Please try again later.';
+        message = 'SMS quota reached. Upgrade and try again later.';
         break;
       case 'operation-not-allowed':
-        message = 'Phone login is not enabled in Firebase Authentication.';
+        message = 'Phone login is not enabled Authentication.';
         break;
       case 'app-not-authorized':
       case 'missing-client-identifier':
         message =
-            'This app is not authorized for phone login. Add SHA-1/SHA-256 in Firebase and download the updated google-services.json.';
+            'App verification failed. Add debug/release SHA-1 & SHA-256 in Firebase Console.';
         break;
       case 'invalid-verification-code':
         message = 'Wrong OTP. Please check the code and try again.';
@@ -250,13 +245,13 @@ class _LoginScreenState extends State<LoginScreen>
         message = 'OTP expired. Please request a new code.';
         break;
       default:
-        message = e.message ?? 'Could not send OTP. Please try again.';
+        message = rawMsg.isNotEmpty ? rawMsg : 'Could not send OTP. Please try again.';
     }
     return kDebugMode ? '$message (${e.code})' : message;
   }
 
   void _setAuthError(FirebaseAuthException e) {
-    debugPrint('Firebase phone auth failed: ${e.code} - ${e.message}');
+    debugPrint('Phone auth failed: ${e.code} - ${e.message}');
     setState(() {
       _loading = false;
       _error = _authErrorMessage(e);
@@ -313,7 +308,7 @@ class _LoginScreenState extends State<LoginScreen>
             _setAuthError(e);
           } catch (e) {
             if (!mounted) return;
-            debugPrint('Firebase auto verification failed: $e');
+            debugPrint('Auto verification failed: $e');
             setState(() {
               _loading = false;
               _error = 'Auto verification failed. Please enter OTP manually.';
@@ -326,7 +321,7 @@ class _LoginScreenState extends State<LoginScreen>
         },
         codeSent: (verificationId, resendToken) {
           if (!mounted) return;
-          debugPrint('Firebase phone auth code sent to $_phoneNumber');
+          debugPrint('Phone auth code sent to $_phoneNumber');
           _verificationId = verificationId;
           _forceResendingToken = resendToken;
           _transitionTo(_Step.otp);
@@ -346,7 +341,7 @@ class _LoginScreenState extends State<LoginScreen>
       _setAuthError(e);
     } catch (e) {
       if (!mounted) return;
-      debugPrint('Firebase phone auth request failed: $e');
+      debugPrint('phone auth request failed: $e');
       setState(() {
         _loading = false;
         _error = 'Could not send OTP. Please try again.';
@@ -383,7 +378,7 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _error = _authErrorMessage(e));
     } catch (e) {
       if (!mounted) return;
-      debugPrint('Firebase OTP verification failed: $e');
+      debugPrint(' OTP verification failed: $e');
       setState(() => _error = 'Could not verify OTP. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);

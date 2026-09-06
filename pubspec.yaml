@@ -3,9 +3,7 @@ description: "CartKaro Partner Hub"
 
 publish_to: 'none'
 
-
 version: 1.0.0+1
-
 
 environment:
   sdk: ^3.11.5
@@ -35,22 +33,6 @@ dependencies:
 
 
   # ======================
-  # NETWORK / API
-  # ======================
-
-  dio: ^5.9.2
-
-
-
-  # ======================
-  # LOCAL STORAGE
-  # ======================
-
-  shared_preferences: ^2.5.5
-
-
-
-  # ======================
   # RESPONSIVE UI
   # ======================
 
@@ -63,12 +45,6 @@ dependencies:
   # ======================
 
   google_fonts: ^8.1.0
-  flutter_svg: ^2.3.0
-  shimmer: ^3.0.0
-  lottie: ^3.3.3
-  cached_network_image: ^3.4.1
-  carousel_slider: ^5.1.2
-  flutter_rating_bar: ^4.0.1
 
 
 
@@ -86,17 +62,6 @@ dependencies:
 
   geolocator: ^10.1.0
   geocoding: ^2.1.1
-  google_maps_flutter: ^2.17.1
-  flutter_polyline_points: ^3.1.0
-  location: ^8.0.1
-
-
-
-  # ======================
-  # PERMISSIONS
-  # ======================
-
-  permission_handler: ^12.0.3
 
 
 
@@ -110,30 +75,26 @@ dependencies:
 
 
   # ======================
-  # FIREBASE
+  # FIREBASE (Active)
   # ======================
 
   firebase_core: ^4.10.0
   firebase_auth: ^6.5.4
-  firebase_messaging: ^16.3.0
-  cloud_firestore: ^6.6.0
-  firebase_storage: ^13.4.3
+
+  # ======================
+  # FIREBASE (Future — uncomment when implementing Firestore, Storage, Notifications)
+  # ======================
+  # firebase_messaging: ^16.3.0
+  # cloud_firestore: ^6.6.0
+  # firebase_storage: ^13.4.3
+  # flutter_local_notifications: ^22.0.1
 
 
 
   # ======================
-  # NOTIFICATIONS
+  # PAYMENT (Future — uncomment when implementing Razorpay)
   # ======================
-
-  flutter_local_notifications: ^22.0.1
-
-
-
-  # ======================
-  # PAYMENT
-  # ======================
-
-  razorpay_flutter: ^1.4.5
+  # razorpay_flutter: ^1.4.5
 
 
 
@@ -146,15 +107,6 @@ dependencies:
 
 
   # ======================
-  # DEVICE / APP INFO
-  # ======================
-
-  device_info_plus: ^12.4.0
-  package_info_plus: ^9.0.1
-
-
-
-  # ======================
   # INTERNET CHECK
   # ======================
 
@@ -163,7 +115,7 @@ dependencies:
 
 
   # ======================
-  # CALL / URL / MAP LAUNCH
+  # CALL / URL LAUNCH
   # ======================
 
   url_launcher: ^6.3.2
@@ -175,18 +127,6 @@ dependencies:
   # ======================
 
   intl: ^0.20.2
-  uuid: ^4.5.3
-  logger: ^2.7.0
-  fluttertoast: ^9.1.0
-  flutter_dotenv: ^6.0.1
-
-
-
-  # ======================
-  # OTP INPUT
-  # ======================
-
-  pinput: ^6.0.2
 
 
 

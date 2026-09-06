@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/screens/splash_screen.dart';
@@ -13,12 +14,28 @@ import '../../features/dashboard/screens/dashboard_layout.dart';
 
 import '../../features/auth/screens/reset_pin_screen.dart';
 
+// Routes that do NOT require authentication
+const _publicRoutes = ['/splash', '/login', '/pin-login', '/reset-pin'];
+
 class AppRouter {
   static final router = GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/splash',
+
+    // ── Auth Guard ────────────────────────────────────────────
+    // If the user is not logged in and tries to access a protected
+    // route (dashboard, registration, business-type), redirect to /login.
+    redirect: (context, state) {
+      final loggedIn = FirebaseAuth.instance.currentUser != null;
+      final isPublic = _publicRoutes.contains(state.matchedLocation);
+
+      if (!loggedIn && !isPublic) {
+        return '/login';
+      }
+      return null; // allow navigation
+    },
 
     routes: [
-      GoRoute(path: '/', redirect: (context, state) => '/login'),
+      GoRoute(path: '/', redirect: (context, state) => '/splash'),
 
       GoRoute(
         path: '/splash',
@@ -34,31 +51,31 @@ class AppRouter {
         builder: (context, state) => const PinLoginScreen(),
       ),
 
-      // Choose Grocery / Restaurant / Medical
+      // Choose Grocery / Restaurant / Medical  [Auth required]
       GoRoute(
         path: '/business-type',
         builder: (context, state) => const BusinessTypeScreen(),
       ),
 
-      // Grocery Registration
+      // Grocery Registration  [Auth required]
       GoRoute(
         path: '/register/grocery',
         builder: (context, state) => const GroceryRegistrationScreen(),
       ),
 
-      // Restaurant Registration
+      // Restaurant Registration  [Auth required]
       GoRoute(
         path: '/register/restaurant',
         builder: (context, state) => const RestaurantRegistrationScreen(),
       ),
 
-      // Medical Registration
+      // Medical Registration  [Auth required]
       GoRoute(
         path: '/register/medical',
         builder: (context, state) => const MedicalRegistrationScreen(),
       ),
 
-      // Default Dashboard
+      // Default Dashboard  [Auth required]
       GoRoute(
         path: '/dashboard',
         builder: (context, state) =>

@@ -35,6 +35,8 @@ android {
 
     buildTypes {
         release {
+            // TODO: Before Play Store release, create a proper keystore and configure
+            // signingConfigs.release here. Using debug signing for Play Store is rejected.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

@@ -774,10 +774,19 @@ class _OrdersManagementScreenState extends State<OrdersManagementScreen> {
   // ── UI builders ──
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+      padding: const EdgeInsets.fromLTRB(12, 20, 20, 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Back button
+          IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            icon: const Icon(LucideIcons.arrowLeft, size: 22, color: AppColors.kDarkText),
+            tooltip: 'Back',
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+          const SizedBox(width: 4),
           const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

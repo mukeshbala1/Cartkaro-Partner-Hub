@@ -61,7 +61,12 @@ class _ProductsManagementScreenState extends State<ProductsManagementScreen> {
         backgroundColor: AppColors.kBackground,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        titleSpacing: 20,
+        leading: IconButton(
+          icon: const Icon(LucideIcons.arrowLeft, color: AppColors.kDarkText, size: 22),
+          tooltip: 'Back',
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        titleSpacing: 4,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

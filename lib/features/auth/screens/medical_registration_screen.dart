@@ -36,10 +36,6 @@ const Color kSuccessColor   = Color(0xFF43A047);
 const Color kWarningColor   = Color(0xFFFFA000);
 const Color kDivider        = Color(0xFFEEF2F8);
 
-// ─────────────────────────────────────────
-// TESTING MODE FLAG
-// ─────────────────────────────────────────
-bool isTestingMode = false;
 
 // ─────────────────────────────────────────
 // ENTRY POINT — MAIN SCREEN
@@ -349,7 +345,7 @@ class _MedicalRegistrationScreenState
 
     final form = _formKeys[_currentStep].currentState;
 
-    if (!isTestingMode && form != null && !form.validate()) {
+    if (form != null && !form.validate()) {
       return;
     }
 
@@ -506,9 +502,9 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Row(
           children: [
-            if (_currentStep > 0 && _currentStep < 8)
+            if (_currentStep < 8)
               GestureDetector(
-                onTap: _prevStep,
+                onTap: _currentStep > 0 ? _prevStep : () => Navigator.pop(context),
                 child: Container(
                   width: 38,
                   height: 38,
@@ -758,7 +754,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
             LengthLimitingTextInputFormatter(4),
           ],
           validator: (value) {
-            if (isTestingMode) return null;
+
             if (value == null || value.isEmpty) return 'PIN is required';
             if (value.length != 4) return 'PIN must be exactly 4 digits';
             return null;
@@ -779,7 +775,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
             LengthLimitingTextInputFormatter(4),
           ],
           validator: (value) {
-            if (isTestingMode) return null;
+
             if (value == null || value.isEmpty) return 'Confirm PIN required';
             if (value != _passwordCtrl.text) return 'PIN does not match';
             return null;
@@ -1298,7 +1294,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
           prefixIcon: Icons.numbers_outlined,
           keyboardType: TextInputType.number,
           validator: (value) {
-            if (isTestingMode) return null;
+
             if (value == null || value.isEmpty) {
               return 'Confirm account number required';
             }
@@ -1322,7 +1318,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
             FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
           ],
           validator: (value) {
-            if (isTestingMode) return null;
+
             if (value == null || value.isEmpty) return 'IFSC Code required';
             final ifscRegex = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
             if (!ifscRegex.hasMatch(value.toUpperCase())) {
