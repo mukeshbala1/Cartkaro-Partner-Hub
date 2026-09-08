@@ -2530,12 +2530,12 @@ void _switchBusiness(BusinessModel b) {
 
 void _refreshActiveBusiness() {
   setState(() {
-    _active = MockData.businesses.firstWhere((b) => b.id == _active.id);
+    // Should fetch from firestore here
   });
 }
   @override
   Widget build(BuildContext context) {
-    final others = MockData.businesses.where((b) => b.id != _active.id).toList();
+    final others = <BusinessModel>[]; // In real app, fetch from Firestore or pass from Dashboard
 
     return Scaffold(
       backgroundColor: AppColors.kBackground,

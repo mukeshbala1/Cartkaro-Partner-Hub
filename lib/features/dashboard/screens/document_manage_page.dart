@@ -293,12 +293,8 @@ class _DocumentManagePageState extends State<DocumentManagePage> {
       _hasChanges = true;
     });
 
-    final ok = await MockData.updateDocumentStatus(
-      businessId: _business.id,
-      documentName: doc.name,
-      newStatus: "pending",
-      filePath: filePath,
-    );
+    await Future.delayed(const Duration(seconds: 2));
+    final ok = true; // In a real app, update via API/Firestore
 
     if (!mounted) return;
 

@@ -10,12 +10,14 @@ import '../../features/auth/screens/grocery_registration_screen.dart';
 import '../../features/auth/screens/restaurant_registration_screen.dart';
 import '../../features/auth/screens/medical_registration_screen.dart';
 
+import '../../features/auth/screens/business_selector_screen.dart'; // NEW
 import '../../features/dashboard/screens/dashboard_layout.dart';
 
 import '../../features/auth/screens/reset_pin_screen.dart';
+import '../../features/auth/screens/pin_setup_screen.dart';
 
 // Routes that do NOT require authentication
-const _publicRoutes = ['/splash', '/login', '/pin-login', '/reset-pin'];
+const _publicRoutes = ['/splash', '/login', '/pin-login', '/reset-pin', '/pin-setup'];
 
 class AppRouter {
   static final router = GoRouter(
@@ -75,17 +77,31 @@ class AppRouter {
         builder: (context, state) => const MedicalRegistrationScreen(),
       ),
 
+      // Business Selector [Auth required]
+      GoRoute(
+        path: '/business-selector',
+        builder: (context, state) => const BusinessSelectorScreen(),
+      ),
+
       // Default Dashboard  [Auth required]
       GoRoute(
         path: '/dashboard',
-        builder: (context, state) =>
-            const DashboardLayout(businessType: "grocery"),
+        builder: (context, state) {
+          final businessId = state.extra as String?;
+          return DashboardLayout(businessId: businessId);
+        },
       ),
 
       // Reset PIN
       GoRoute(
         path: '/reset-pin',
         builder: (context, state) => const ResetPinScreen(),
+      ),
+
+      // Set PIN
+      GoRoute(
+        path: '/pin-setup',
+        builder: (context, state) => const PinSetupScreen(),
       ),
     ],
   );

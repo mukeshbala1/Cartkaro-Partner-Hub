@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive.dart';
+import '../../../core/services/auth_service.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 // Ye 4 files import karna zaroori hai
@@ -11,11 +14,11 @@ import '../../products/screens/products_management_screen.dart';
 import '../../orders/orders_management_screen.dart';
 
 class DashboardLayout extends StatefulWidget {
-  final String businessType;
+  final String? businessId; // Changed to businessId
 
   const DashboardLayout({
     Key? key,
-    required this.businessType,
+    this.businessId,
   }) : super(key: key);
 
   @override
@@ -33,10 +36,11 @@ class _DashboardLayoutState extends State<DashboardLayout> {
   @override
   void initState() {
     super.initState();
-    _currentBusinessType = widget.businessType;
+    _currentBusinessType = 'grocery'; // Default, will be updated by DashboardScreen
   }
 
   void _changeBusiness(String newType) {
+    if (_currentBusinessType == newType) return;
     setState(() {
       _currentBusinessType = newType;
     });
@@ -118,7 +122,7 @@ class _DashboardLayoutState extends State<DashboardLayout> {
   List<Widget> get _pages => [
         // Home Tab
         DashboardScreen(
-          businessType: _currentBusinessType,
+          businessId: widget.businessId,
           onBusinessChanged: _changeBusiness,
           activeCount: activeItemsCount,
           onAddProductTap: _addNewItem,
@@ -147,6 +151,10 @@ class _DashboardLayoutState extends State<DashboardLayout> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.businessId == null || widget.businessId!.isEmpty) {
+      return _buildNoBusinessView();
+    }
+
     return Scaffold(
       backgroundColor: AppColors.kBackground,
       body: Responsive(
@@ -155,6 +163,85 @@ class _DashboardLayoutState extends State<DashboardLayout> {
         desktop: Row(children: [_buildSidebar(), Expanded(child: _pages[_selectedIndex])]),
       ),
       bottomNavigationBar: Responsive.isMobile(context) ? _buildPremiumBottomNav() : null,
+    );
+  }
+
+  Widget _buildNoBusinessView() {
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      appBar: AppBar(
+        backgroundColor: AppColors.kBackground,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(LucideIcons.logOut, color: AppColors.kDarkText),
+            onPressed: () async {
+              final hasPin = await AuthService.isPinSet();
+              if (hasPin) {
+                if (mounted) context.go('/pin-login');
+              } else {
+                await FirebaseAuth.instance.signOut();
+                if (mounted) context.go('/login');
+              }
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8EEF5),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.kPrimary, width: 2.5),
+                ),
+                child: const Icon(LucideIcons.store, color: AppColors.kPrimary, size: 52),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'No Business\nRegistered',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.kDarkText,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'You haven\'t registered a business yet. Register your business to access the dashboard.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.kLightText, fontSize: 14, height: 1.55),
+              ),
+              const SizedBox(height: 36),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    context.go('/business-type');
+                  },
+                  icon: const Icon(LucideIcons.plus, size: 18),
+                  label: const Text('Register Business', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.kPrimary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

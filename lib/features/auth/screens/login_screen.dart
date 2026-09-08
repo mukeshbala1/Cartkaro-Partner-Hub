@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../../../core/services/auth_service.dart';
 
 // ── Brand tokens ────────────────────────────────────────────────
 const Color kBrand = Color(0xFF223554);
@@ -302,7 +304,7 @@ class _LoginScreenState extends State<LoginScreen>
             await FirebaseAuth.instance.signInWithCredential(credential);
             if (!mounted) return;
             _resendTimer?.cancel();
-            _transitionTo(_Step.success);
+            await _handlePostAuthNavigation();
           } on FirebaseAuthException catch (e) {
             if (!mounted) return;
             _setAuthError(e);
@@ -372,7 +374,7 @@ class _LoginScreenState extends State<LoginScreen>
       await FirebaseAuth.instance.signInWithCredential(credential);
       if (!mounted) return;
       _resendTimer?.cancel();
-      _transitionTo(_Step.success);
+      await _handlePostAuthNavigation();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() => _error = _authErrorMessage(e));
@@ -383,6 +385,43 @@ class _LoginScreenState extends State<LoginScreen>
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _handlePostAuthNavigation() async {
+    final hasPin = await AuthService.isPinSet();
+    if (!mounted) return;
+    if (!hasPin) {
+      context.go('/pin-setup');
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final querySnapshot = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: user.uid)
+            .get();
+
+        if (!mounted) return;
+
+        if (querySnapshot.docs.isEmpty) {
+          _transitionTo(_Step.success);
+          return;
+        } else if (querySnapshot.docs.length == 1) {
+          context.go('/dashboard', extra: querySnapshot.docs.first.id);
+          return;
+        } else {
+          context.go('/business-selector');
+          return;
+        }
+      } catch (e) {
+        debugPrint('Error checking businesses: $e');
+      }
+    }
+
+    if (!mounted) return;
+    _transitionTo(_Step.success);
   }
 
   void _transitionTo(_Step next) {
@@ -1031,9 +1070,42 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 28),
         _buildCtaButton(
-          label: 'Go to Dashboard',
+          label: 'Continue',
           icon: LucideIcons.arrowRight,
-          onTap: () => context.go('/business-type'),
+          onTap: () async {
+            final hasPin = await AuthService.isPinSet();
+            if (!mounted) return;
+            if (!hasPin) {
+              context.go('/pin-setup');
+              return;
+            }
+            final user = FirebaseAuth.instance.currentUser;
+            if (user != null) {
+              try {
+                final snap = await FirebaseFirestore.instance
+                    .collection('businesses')
+                    .where('ownerUid', isEqualTo: user.uid)
+                    .get();
+                if (!mounted) return;
+                if (snap.docs.isEmpty) {
+                  context.go('/business-type');
+                } else if (snap.docs.length == 1) {
+                  context.go('/dashboard', extra: snap.docs.first.id);
+                } else {
+                  context.go('/business-selector');
+                }
+                return;
+              } catch (e) {
+                debugPrint('Error navigating from success step: $e');
+              }
+            }
+            if (mounted) context.go('/business-type');
+          },
+        ),
+        const SizedBox(height: 16),
+        TextButton(
+          onPressed: () => context.go('/business-type'),
+          child: const Text('Register New Business', style: TextStyle(color: kBrand, fontWeight: FontWeight.bold, fontSize: 14)),
         ),
         const SizedBox(height: 12),
       ],

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/services/auth_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -24,12 +26,38 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
     
     _controller.forward();
+    _checkLoginStatus();
+  }
 
-    Future.delayed(const Duration(seconds: 3), () {
+  Future<void> _checkLoginStatus() async {
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    // No Firebase session → go to login
+    if (user == null) {
+      context.go('/login');
+      return;
+    }
+
+    // User is logged in — check PIN status
+    try {
+      final pinSet = await AuthService.isPinSet();
       if (!mounted) return;
-      final user = FirebaseAuth.instance.currentUser;
-      context.go(user == null ? '/login' : '/business-type');
-    });
+
+      if (!pinSet) {
+        // First time on this device — need to set up PIN
+        context.go('/pin-setup');
+      } else {
+        // PIN exists → gate entry with PIN / biometric
+        context.go('/pin-login');
+      }
+    } catch (e) {
+      debugPrint('Error checking PIN status: $e');
+      if (!mounted) return;
+      context.go('/pin-login');
+    }
   }
 
   @override

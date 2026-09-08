@@ -1,704 +1,410 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import '../../../core/services/auth_service.dart';
 
+class BusinessTypeScreen extends StatefulWidget {
+  const BusinessTypeScreen({super.key});
 
-class BusinessTypeScreen extends StatelessWidget {
+  @override
+  State<BusinessTypeScreen> createState() => _BusinessTypeScreenState();
+}
 
-  const BusinessTypeScreen({Key? key}) : super(key: key);
+class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
+  String? _selectedCategory;
 
+  final List<_CategoryData> _categories = const [
+    _CategoryData(
+      id: 'grocery',
+      title: 'Grocery Store',
+      subtitle: 'Groceries, fresh produce, daily essentials & FMCG',
+      imagePath: 'assets/categories/grocery.jpg',
+      accentColor: Color(0xFF059669),
+      badgeText: 'Popular',
+    ),
+    _CategoryData(
+      id: 'restaurant',
+      title: 'Restaurant & Cafe',
+      subtitle: 'Dine-in, cloud kitchen, food delivery & digital menu',
+      imagePath: 'assets/categories/restaurant.jpg',
+      accentColor: Color(0xFFEA580C),
+      badgeText: 'Trending',
+    ),
+    _CategoryData(
+      id: 'medical',
+      title: 'Medical & Pharmacy',
+      subtitle: 'Prescriptions, medicines, healthcare & wellness items',
+      imagePath: 'assets/categories/medical.jpg',
+      accentColor: Color(0xFF0284C7),
+      badgeText: 'Verified',
+    ),
+  ];
+
+  Future<void> _handleBack() async {
+    final hasPin = await AuthService.isPinSet();
+    if (!mounted) return;
+    if (hasPin) {
+      context.go('/pin-login');
+    } else if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/login');
+    }
+  }
+
+  void _onCategorySelected(String categoryId) {
+    setState(() => _selectedCategory = categoryId);
+    Future.delayed(const Duration(milliseconds: 140), () {
+      if (mounted) {
+        context.push('/register/$categoryId');
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = Responsive.isMobile(context);
 
     return Scaffold(
-
-      backgroundColor: AppColors.kBackground,
-
-
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-
         backgroundColor: Colors.transparent,
-
         elevation: 0,
-
-
-        leading: IconButton(
-
-          icon: const Icon(
-            LucideIcons.arrowLeft,
-            color: AppColors.kDarkText,
+        scrolledUnderElevation: 0,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: Center(
+            child: Material(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              elevation: 0,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: _handleBack,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Icon(
+                    LucideIcons.arrowLeft,
+                    color: Color(0xFF0F172A),
+                    size: 18,
+                  ),
+                ),
+              ),
+            ),
           ),
-
-
-          onPressed: () {
-
-            if (context.canPop()) {
-
-              context.pop();
-
-            } else {
-
-              context.go('/login');
-
-            }
-
-          },
-
         ),
-
-      ),
-
-
-
-
-      body: SafeArea(
-
-        child: Responsive(
-
-          mobile: _buildContent(context, 1),
-
-          tablet: _buildContent(context, 2),
-
-          desktop: _buildContent(context, 3),
-
-        ),
-
-      ),
-
-    );
-
-  }
-
-
-
-
-
-  Widget _buildContent(
-      BuildContext context,
-      int crossAxisCount,
-      ) {
-
-
-    return Padding(
-
-
-      padding: const EdgeInsets.only(
-        left: 24,
-        right: 24,
-        bottom: 16,
-      ),
-
-
-
-      child: Column(
-
-
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
-
-
-
-        children: [
-
-
-
-          Text(
-
-            "What type of business do you own?",
-
-
-            style: Theme.of(context)
-                .textTheme
-                .headlineMedium
-                ?.copyWith(
-
-              fontWeight: FontWeight.bold,
-
-              color: AppColors.kDarkText,
-
-              fontSize:
-
-              Responsive.isMobile(context)
-                  ? 24
-                  : 32,
-
-            ),
-
-          ),
-
-
-
-
-          const SizedBox(height: 8),
-
-
-
-
-          Text(
-
-            "Select your category to customize your CartKaro experience.",
-
-
-            style: Theme.of(context)
-                .textTheme
-                .bodyLarge
-                ?.copyWith(
-
-              color: AppColors.kLightText,
-
-            ),
-
-          ),
-
-
-
-
-
-          const SizedBox(height: 32),
-
-
-
-
-
-          Expanded(
-
-
-            child: GridView.count(
-
-
-              crossAxisCount: crossAxisCount,
-
-
-              crossAxisSpacing: 16,
-
-
-              mainAxisSpacing: 16,
-
-
-              childAspectRatio:
-
-              Responsive.isMobile(context)
-
-                  ? 2.3
-
-                  : 1.6,
-
-
-
-
-              children: const [
-
-
-
-                BusinessCard(
-
-                  title: "Grocery Store",
-
-                  subtitle:
-                  "Sell groceries and daily essentials",
-
-                  type: "grocery",
-
-                  icon:
-                  LucideIcons.shoppingCart,
-
-                  color:
-                  AppColors.kPrimary,
-
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 20),
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.kPrimary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.kPrimary.withValues(alpha: 0.15)),
                 ),
-
-
-
-
-
-                BusinessCard(
-
-                  title: "Restaurant",
-
-                  subtitle:
-                  "Manage food orders and menu",
-
-                  type: "restaurant",
-
-                  icon:
-                  LucideIcons.utensils,
-
-                  color:
-                  AppColors.kPrimary,
-
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.sparkles, size: 13, color: AppColors.kPrimary),
+                    SizedBox(width: 5),
+                    Text(
+                      'Step 1 of 2',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.kPrimary,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
                 ),
-
-
-
-
-
-                BusinessCard(
-
-                  title: "Medical Store",
-
-                  subtitle:
-                  "Sell healthcare products",
-
-                  type: "medical",
-
-                  icon:
-                  LucideIcons.pill,
-
-                  color:
-                  AppColors.kPrimary,
-
-                ),
-
-
-
-              ],
-
+              ),
             ),
-
           ),
-
-
         ],
-
       ),
-
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: EdgeInsets.symmetric(
+            horizontal: isMobile ? 20 : 32,
+            vertical: 8,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 580),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  const Text(
+                    'What type of business\ndo you own?',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                      letterSpacing: -0.6,
+                      height: 1.22,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Choose your category to personalize your store tools, catalog, and checkout flow.',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      color: Color(0xFF64748B),
+                      fontWeight: FontWeight.w400,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  ..._categories.map((cat) {
+                    final isSelected = _selectedCategory == cat.id;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: _CategoryCard(
+                        category: cat,
+                        isSelected: isSelected,
+                        onTap: () => _onCategorySelected(cat.id),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x04000000),
+                            blurRadius: 8,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(LucideIcons.store, size: 14, color: AppColors.kPrimary),
+                          SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'You can add more store categories or branches anytime',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: Color(0xFF475569),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
-
   }
-
 }
 
-
-
-
-
-
-
-
-
-class BusinessCard extends StatefulWidget {
-
-
+class _CategoryData {
+  final String id;
   final String title;
-
   final String subtitle;
+  final String imagePath;
+  final Color accentColor;
+  final String badgeText;
 
-  final String type;
-
-  final IconData icon;
-
-  final Color color;
-
-
-
-
-  const BusinessCard({
-
-    Key? key,
-
+  const _CategoryData({
+    required this.id,
     required this.title,
-
     required this.subtitle,
+    required this.imagePath,
+    required this.accentColor,
+    required this.badgeText,
+  });
+}
 
-    required this.type,
+class _CategoryCard extends StatefulWidget {
+  final _CategoryData category;
+  final bool isSelected;
+  final VoidCallback onTap;
 
-    required this.icon,
-
-    required this.color,
-
-  }) : super(key: key);
-
-
-
+  const _CategoryCard({
+    required this.category,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
-
-  State<BusinessCard> createState()
-  => _BusinessCardState();
-
+  State<_CategoryCard> createState() => _CategoryCardState();
 }
 
-
-
-
-
-
-
-
-class _BusinessCardState
-    extends State<BusinessCard> {
-
-
-
-  bool isHovered = false;
-
-
-
-
+class _CategoryCardState extends State<_CategoryCard> {
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
-
+    final cat = widget.category;
+    final active = widget.isSelected || _isHovered;
 
     return MouseRegion(
-
-
-
-      onEnter: (_) {
-
-        setState(() {
-
-          isHovered = true;
-
-        });
-
-      },
-
-
-
-
-      onExit: (_) {
-
-        setState(() {
-
-          isHovered = false;
-
-        });
-
-      },
-
-
-
-
-
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
       child: AnimatedContainer(
-
-
-        duration:
-        const Duration(milliseconds: 150),
-
-
-
-
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
         decoration: BoxDecoration(
-
-
-          color: AppColors.kWhite,
-
-
-          borderRadius:
-          BorderRadius.circular(16),
-
-
-
-
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
-
-
-            color:
-
-            isHovered
-
-                ? widget.color
-
-                : AppColors.kBorder,
-
-
-
-            width:
-
-            isHovered ? 1.5 : 1,
-
-
+            color: active ? cat.accentColor : const Color(0xFFE2E8F0),
+            width: active ? 2.0 : 1.2,
           ),
-
-
-
-
-
           boxShadow: [
-
-
             BoxShadow(
-
-
-              color:
-
-              isHovered
-
-                  ? widget.color.withOpacity(0.06)
-
-                  : Colors.black.withOpacity(0.02),
-
-
-
-              blurRadius:
-
-              isHovered ? 12 : 6,
-
-
-
-              offset:
-
-              const Offset(0, 4),
-
+              color: active
+                  ? cat.accentColor.withValues(alpha: 0.14)
+                  : const Color(0x06000000),
+              blurRadius: active ? 16 : 8,
+              offset: Offset(0, active ? 5 : 2),
             ),
-
           ],
-
         ),
-
-
-
-
-
-
-
-
         child: Material(
-
-
           color: Colors.transparent,
-
-
-
-
+          borderRadius: BorderRadius.circular(20),
           child: InkWell(
-
-
-            borderRadius:
-            BorderRadius.circular(16),
-
-
-
-
-
-            onTap: () {
-
-
-              context.push(
-                '/register/${widget.type}',
-              );
-
-
-            },
-
-
-
-
-
-
+            borderRadius: BorderRadius.circular(20),
+            onTap: widget.onTap,
+            splashColor: cat.accentColor.withValues(alpha: 0.08),
+            highlightColor: cat.accentColor.withValues(alpha: 0.04),
             child: Padding(
-
-
-              padding:
-              const EdgeInsets.all(16),
-
-
-
-
-
+              padding: const EdgeInsets.all(18),
               child: Row(
-
-
                 children: [
-
-
-
+                  // 3D AI Logo Container
                   Container(
-
-
-                    padding:
-                    const EdgeInsets.all(12),
-
-
-
+                    width: 72,
+                    height: 72,
                     decoration: BoxDecoration(
-
-
-                      color:
-
-                      widget.color
-                          .withOpacity(0.08),
-
-
-
-                      shape:
-                      BoxShape.circle,
-
-                    ),
-
-
-
-
-                    child: Icon(
-
-
-                      widget.icon,
-
-
-                      color:
-                      widget.color,
-
-
-                      size: 24,
-
-                    ),
-
-                  ),
-
-
-
-
-
-
-                  const SizedBox(width: 16),
-
-
-
-
-
-
-
-
-                  Expanded(
-
-
-                    child: Column(
-
-
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
-
-
-
-                      mainAxisAlignment:
-                      MainAxisAlignment.center,
-
-
-
-                      children: [
-
-
-
-                        Text(
-
-
-                          widget.title,
-
-
-
-                          style:
-                          const TextStyle(
-
-
-                            fontSize: 16,
-
-
-                            fontWeight:
-                            FontWeight.bold,
-
-
-                            color:
-                            AppColors.kDarkText,
-
-
-                          ),
-
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: cat.accentColor.withValues(alpha: 0.15),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: cat.accentColor.withValues(alpha: 0.10),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
                         ),
-
-
-
-
-
-                        const SizedBox(height: 4),
-
-
-
-
-
-
-                        Text(
-
-
-                          widget.subtitle,
-
-
-
-                          style:
-                          const TextStyle(
-
-                            fontSize: 12,
-
-                            color:
-                            AppColors.kLightText,
-
-                          ),
-
-
-
-                          maxLines: 2,
-
-
-                          overflow:
-                          TextOverflow.ellipsis,
-
-
-                        ),
-
                       ],
-
                     ),
-
+                    clipBehavior: Clip.antiAlias,
+                    child: Image.asset(
+                      cat.imagePath,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Center(
+                          child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
+                        );
+                      },
+                    ),
                   ),
-
-
-
-
-
-
-                  Icon(
-
-
-                    LucideIcons.chevronRight,
-
-
-
-                    color:
-
-                    isHovered
-
-                        ? widget.color
-
-                        : AppColors.kLightText
-                        .withOpacity(0.5),
-
-
-
-
-                    size: 18,
-
+                  const SizedBox(width: 16),
+                  // Title & Minimal Subtitle
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                cat.title,
+                                style: const TextStyle(
+                                  fontSize: 17.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0F172A),
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: cat.accentColor.withValues(alpha: 0.09),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                cat.badgeText,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: cat.accentColor,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          cat.subtitle,
+                          style: const TextStyle(
+                            fontSize: 12.8,
+                            color: Color(0xFF64748B),
+                            height: 1.4,
+                            fontWeight: FontWeight.w400,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
-
-
-
+                  const SizedBox(width: 12),
+                  // Forward Arrow Action
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: active ? cat.accentColor : const Color(0xFFF1F5F9),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      LucideIcons.chevronRight,
+                      size: 18,
+                      color: active ? Colors.white : const Color(0xFF64748B),
+                    ),
+                  ),
                 ],
-
               ),
-
             ),
-
           ),
-
         ),
-
       ),
-
     );
-
   }
-
 }

@@ -9,11 +9,15 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -61,6 +65,8 @@ class _GroceryRegistrationScreenState
 
   final List<GlobalKey<FormState>> _formKeys =
       List.generate(9, (_) => GlobalKey<FormState>());
+      
+  String? _savedBusinessId;
 
   // ── Step 1 ──
   final _ownerNameCtrl   = TextEditingController();
@@ -345,7 +351,7 @@ class _GroceryRegistrationScreenState
   // ─────────────────────────────────────────
   // FIX 1: NAVIGATION — WidgetsBinding se jumpToPage call karo
   // ─────────────────────────────────────────
-  void _nextStep() {
+  Future<void> _nextStep() async {
     FocusScope.of(context).unfocus();
 
     final form = _formKeys[_currentStep].currentState;
@@ -354,19 +360,7 @@ class _GroceryRegistrationScreenState
       return;
     }
 
-  // Step 1 Profile Photo Mandatory
-if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(
-        "Please upload your profile photo",
-      ),
-      backgroundColor: kErrorColor,
-    ),
-  );
-
-  return;
-}
+    // Step 0 Profile Photo is no longer mandatory
   
       // Step 2 GPS Location Mandatory
   if (_currentStep == 1 &&
@@ -407,6 +401,59 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
 
     if (_currentStep < 8) {
       final nextPage = _currentStep + 1;
+
+      if (nextPage == 8) {
+        // Save to Firestore
+        try {
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            final docRef = FirebaseFirestore.instance.collection('businesses').doc();
+            await docRef.set({
+              'ownerUid': user.uid,
+              'businessType': 'grocery',
+              'status': 'pending',
+              'isLive': false,
+              'createdAt': FieldValue.serverTimestamp(),
+              'mobile': user.phoneNumber,
+              'ownerName': _ownerNameCtrl.text,
+              'email': _emailCtrl.text,
+              'altMobile': _altMobileCtrl.text,
+              'storeName': _storeNameCtrl.text,
+              'storeAddress': _storeAddressCtrl.text,
+              'city': _cityCtrl.text,
+              'state': _stateCtrl.text,
+              'pincode': _pincodeCtrl.text,
+              'lat': _latCtrl.text,
+              'lng': _lngCtrl.text,
+              'categories': _selectedCategories.toList(),
+              'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
+              'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
+              'workingDays': _workingDays.toList(),
+              'acceptOnlineOrders': _acceptOnlineOrders,
+              'fssaiNumber': _fssaiNumberCtrl.text,
+              'gstNumber': _gstNumberCtrl.text,
+              'tradeLicense': _tradeLicenseCtrl.text,
+              'pan': _panCtrl.text,
+              'aadhaar': _aadhaarCtrl.text,
+              'accountHolder': _accountHolderCtrl.text,
+              'accountNumber': _accountNumberCtrl.text,
+              'ifsc': _ifscCtrl.text,
+              'upi': _upiCtrl.text,
+              'bank': _selectedBank,
+              'deliveryOption': _deliveryOption,
+              'minOrder': _minOrderCtrl.text,
+              'estDelivery': _estDeliveryCtrl.text,
+            });
+            _savedBusinessId = docRef.id;
+          }
+        } catch (e) {
+          debugPrint('Failed to save to Firestore: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to save data. Please check internet connection.")),
+          );
+          return; // Don't proceed if save failed
+        }
+      }
 
       setState(() {
         _currentStep = nextPage;
@@ -483,7 +530,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
                             _buildStep7(),
                             _buildStep8(),
                             // FIX 2: StatefulWidget — loading + success
-                            const _SuccessScreen(),
+                            _SuccessScreen(businessId: _savedBusinessId),
                           ],
                         ),
                       ),
@@ -1525,7 +1572,8 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
 // 5 second loading → fir success + dashboard button
 // ================================================================
 class _SuccessScreen extends StatefulWidget {
-  const _SuccessScreen();
+  final String? businessId;
+  const _SuccessScreen({this.businessId});
 
   @override
   State<_SuccessScreen> createState() => _SuccessScreenState();
@@ -1771,13 +1819,11 @@ class _SuccessScreenState extends State<_SuccessScreen> {
             height: 52,
             child: ElevatedButton.icon(
               onPressed: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => const DashboardLayout(
-                      businessType: 'grocery',
-                    ),
-                  ),
-                );
+                if (widget.businessId != null) {
+                  context.go('/dashboard', extra: widget.businessId);
+                } else {
+                  context.go('/business-type');
+                }
               },
 
               icon: const Icon(
@@ -2729,7 +2775,17 @@ class _CountryCodeMobileField extends StatelessWidget {
             Expanded(
               child: TextFormField(
                 controller: controller,
-                keyboardType: TextInputType.phone,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(10),
+                ],
+                validator: (val) {
+                  if (val != null && val.isNotEmpty && val.length != 10) {
+                    return 'Enter valid 10-digit mobile number';
+                  }
+                  return null;
+                },
                 style: const TextStyle(
                   color: kTextPrimary,
                   fontSize: 14.5,
@@ -2737,6 +2793,7 @@ class _CountryCodeMobileField extends StatelessWidget {
                 ),
                 decoration: InputDecoration(
                   hintText: hint,
+                  counterText: '',
                   hintStyle: const TextStyle(
                       color: kTextHint, fontSize: 14),
                   filled: true,

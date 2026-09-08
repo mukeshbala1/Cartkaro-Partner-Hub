@@ -7,7 +7,17 @@ import 'core/routes/app_router.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+
+  // Firebase init is wrapped in try/catch so the app runs on macOS
+  // even without a GoogleService-Info.plist (UI preview mode).
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    // Firebase not configured for this platform (e.g. macOS dev run).
+    // The app will still launch for UI development purposes.
+    debugPrint('⚠️ Firebase not initialized: $e');
+  }
+
   runApp(const CartKaroPartnerApp());
 }
 

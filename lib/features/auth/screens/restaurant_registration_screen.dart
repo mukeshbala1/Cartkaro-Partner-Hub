@@ -9,11 +9,15 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -62,11 +66,11 @@ class _RestaurantRegistrationScreenState
   final List<GlobalKey<FormState>> _formKeys =
       List.generate(9, (_) => GlobalKey<FormState>());
 
+  String? _savedBusinessId;
+
   // ── Step 1 ──
   final _ownerNameCtrl   = TextEditingController();
   final _emailCtrl       = TextEditingController();
-  final _passwordCtrl    = TextEditingController();
-  final _confirmPassCtrl = TextEditingController();
   final _altMobileCtrl   = TextEditingController();
   String _profilePhotoPath = '';
   String _altCountryCode   = '+91';
@@ -74,6 +78,7 @@ class _RestaurantRegistrationScreenState
   // ── Step 2 ──
   final _restaurantNameCtrl    = TextEditingController();
   final _restaurantAddressCtrl = TextEditingController();
+  final _areaCtrl              = TextEditingController(); // NEW
   final _cityCtrl              = TextEditingController();
   final _stateCtrl             = TextEditingController();
   final _pincodeCtrl           = TextEditingController();
@@ -92,6 +97,10 @@ class _RestaurantRegistrationScreenState
   final Set<String> _workingDays = {
     'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
   };
+  
+  final List<String> _indianStates = [
+    'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+  ];
   bool _acceptOnlineOrders = true;
   bool _acceptTableOrders  = true;
   bool _dineInAvailable    = true;
@@ -130,7 +139,7 @@ class _RestaurantRegistrationScreenState
   void dispose() {
     _pageController.dispose();
     for (final c in [
-      _ownerNameCtrl, _emailCtrl, _passwordCtrl, _confirmPassCtrl,
+      _ownerNameCtrl, _emailCtrl,
       _altMobileCtrl, _restaurantNameCtrl, _restaurantAddressCtrl,
       _cityCtrl, _stateCtrl, _pincodeCtrl, _latCtrl, _lngCtrl,
       _fssaiNumberCtrl, _gstNumberCtrl, _tradeLicenseCtrl, _panCtrl,
@@ -216,9 +225,16 @@ class _RestaurantRegistrationScreenState
         if (placemarks.isNotEmpty && mounted) {
           Placemark place = placemarks.first;
           setState(() {
-            _restaurantAddressCtrl.text =
-                [place.street, place.subLocality, place.locality]
-                    .where((s) => s != null && s.isNotEmpty)
+            String address = [
+              place.name,
+              place.subThoroughfare,
+              place.thoroughfare,
+              place.street
+            ].where((s) => s != null && s.isNotEmpty).toSet().join(', ');
+            
+            _restaurantAddressCtrl.text = address;
+            _areaCtrl.text = [place.subLocality, place.locality]
+                    .where((s) => s != null && s.isNotEmpty).toSet()
                     .join(', ');
             _cityCtrl.text =
                 place.locality ?? place.subAdministrativeArea ?? '';
@@ -250,9 +266,39 @@ class _RestaurantRegistrationScreenState
           _latCtrl.text = lastPos.latitude.toStringAsFixed(6);
           _lngCtrl.text = lastPos.longitude.toStringAsFixed(6);
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('We use last known location.')),
-        );
+        
+        try {
+          List<Placemark> placemarks = await placemarkFromCoordinates(
+            lastPos.latitude,
+            lastPos.longitude,
+          );
+          if (placemarks.isNotEmpty && mounted) {
+            Placemark place = placemarks.first;
+            setState(() {
+            String address = [
+              place.name,
+              place.subThoroughfare,
+              place.thoroughfare,
+              place.street
+            ].where((s) => s != null && s.isNotEmpty).toSet().join(', ');
+            
+            _restaurantAddressCtrl.text = address;
+            _areaCtrl.text = [place.subLocality, place.locality]
+                    .where((s) => s != null && s.isNotEmpty).toSet()
+                    .join(', ');
+            _cityCtrl.text =
+                place.locality ?? place.subAdministrativeArea ?? '';
+            _stateCtrl.text  = place.administrativeArea ?? '';
+            _pincodeCtrl.text = place.postalCode ?? '';
+            });
+          }
+        } catch (_) {}
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ Location and address filled (cached).'), backgroundColor: kSuccessColor),
+          );
+        }
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Location error: $e')),
@@ -338,7 +384,7 @@ class _RestaurantRegistrationScreenState
   // ─────────────────────────────────────────
   // NAVIGATION — WidgetsBinding se jumpToPage call karo
   // ─────────────────────────────────────────
-  void _nextStep() {
+  Future<void> _nextStep() async {
     FocusScope.of(context).unfocus();
 
     final form = _formKeys[_currentStep].currentState;
@@ -347,20 +393,7 @@ class _RestaurantRegistrationScreenState
       return;
     }
 
-  // Step 1 Profile Photo Mandatory
-if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(
-        "Please upload your profile photo",
-      ),
-      backgroundColor: kErrorColor,
-    ),
-  );
-
-  return;
-}
-
+    // Step 0 Profile Photo is no longer mandatory (User requested)
       // Step 2 GPS Location Mandatory
   if (_currentStep == 1 &&
       (_latCtrl.text.isEmpty || _lngCtrl.text.isEmpty)) {
@@ -377,18 +410,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
     return;
   }
 
-  if (_currentStep == 1 && _restaurantPhotos.isEmpty) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(
-        "Please upload at least one restaurant photo",
-      ),
-      backgroundColor: kErrorColor,
-    ),
-  );
-  return;
-}
-
+  // Restaurant photos no longer mandatory
     if (_currentStep == 7 && !_agreementAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -400,6 +422,63 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
 
     if (_currentStep < 8) {
       final nextPage = _currentStep + 1;
+
+      if (nextPage == 8) {
+        // Save to Firestore
+        try {
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            final docRef = FirebaseFirestore.instance.collection('businesses').doc();
+            await docRef.set({
+              'ownerUid': user.uid,
+              'businessType': 'restaurant',
+              'status': 'pending',
+              'isLive': false,
+              'createdAt': FieldValue.serverTimestamp(),
+              'mobile': user.phoneNumber,
+              'ownerName': _ownerNameCtrl.text,
+              'email': _emailCtrl.text,
+              'altMobile': _altMobileCtrl.text,
+              'restaurantName': _restaurantNameCtrl.text,
+              'restaurantAddress': _restaurantAddressCtrl.text,
+              'area': _areaCtrl.text,
+              'city': _cityCtrl.text,
+              'state': _stateCtrl.text,
+              'pincode': _pincodeCtrl.text,
+              'lat': _latCtrl.text,
+              'lng': _lngCtrl.text,
+              'categories': _selectedCategories.toList(),
+              'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
+              'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
+              'workingDays': _workingDays.toList(),
+              'acceptOnlineOrders': _acceptOnlineOrders,
+              'acceptTableOrders': _acceptTableOrders,
+              'dineInAvailable': _dineInAvailable,
+              'fssaiNumber': _fssaiNumberCtrl.text,
+              'gstNumber': _gstNumberCtrl.text,
+              'tradeLicense': _tradeLicenseCtrl.text,
+              'pan': _panCtrl.text,
+              'aadhaar': _aadhaarCtrl.text,
+              'accountHolder': _accountHolderCtrl.text,
+              'accountNumber': _accountNumberCtrl.text,
+              'ifsc': _ifscCtrl.text,
+              'upi': _upiCtrl.text,
+              'bank': _selectedBank,
+              'deliveryOption': _deliveryOption,
+              'preparationTime': _preparationTimeCtrl.text,
+              'costForTwo': _costForTwoCtrl.text,
+              'packagingCharge': _packagingChargeCtrl.text,
+            });
+            _savedBusinessId = docRef.id;
+          }
+        } catch (e) {
+          debugPrint('Failed to save to Firestore: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to save data. Please check internet connection.")),
+          );
+          return; // Don't proceed if save failed
+        }
+      }
 
       setState(() {
         _currentStep = nextPage;
@@ -474,7 +553,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
                             _buildStep6(),
                             _buildStep7(),
                             _buildStep8(),
-                            const _RestaurantSuccessScreen(),
+                            _SuccessScreen(businessId: _savedBusinessId),
                           ],
                         ),
                       ),
@@ -697,7 +776,7 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
       subtitle: 'Your account details for CartKaro Partner Hub',
       icon: Icons.person_outline_rounded,
       children: [
-        _SectionLabel(label: 'Profile Photo'),
+        _SectionLabel(label: 'Profile Photo (Optional)'),
         Center(
           child: _ProfilePhotoUpload(
             path: _profilePhotoPath,
@@ -737,49 +816,6 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
           hint: 'Optional backup number',
         ),
         const SizedBox(height: 24),
-        _SectionLabel(label: 'Security'),
-        CustomTextField(
-          controller: _passwordCtrl,
-          label: 'Create 4 Digit PIN',
-          hint: 'Enter 4 digit PIN',
-          required: true,
-          prefixIcon: Icons.pin_outlined,
-          isPassword: true,
-          keyboardType: TextInputType.number,
-          maxLength: 4,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(4),
-          ],
-          validator: (value) {
-
-            if (value == null || value.isEmpty) return 'PIN is required';
-            if (value.length != 4) return 'PIN must be exactly 4 digits';
-            return null;
-          },
-        ),
-        const SizedBox(height: 16),
-        CustomTextField(
-          controller: _confirmPassCtrl,
-          label: 'Confirm PIN',
-          hint: 'Re-enter 4 digit PIN',
-          required: true,
-          prefixIcon: Icons.pin_outlined,
-          isPassword: true,
-          keyboardType: TextInputType.number,
-          maxLength: 4,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(4),
-          ],
-          validator: (value) {
-
-            if (value == null || value.isEmpty) return 'Confirm PIN required';
-            if (value != _passwordCtrl.text) return 'PIN does not match';
-            return null;
-          },
-        ),
-        const SizedBox(height: 8),
       ],
     );
   }
@@ -794,19 +830,19 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
       subtitle: 'Help customers find and recognise your restaurant',
       icon: Icons.restaurant_outlined,
       children: [
-        _SectionLabel(label: 'Restaurant Branding'),
+        _SectionLabel(label: 'Restaurant Branding (Optional)'),
         _BannerLogoUploadRow(
           logoPath: _restaurantLogoPath,
           bannerPath: _restaurantBannerPath,
-          logoLabel: 'Restaurant Logo',
-          bannerLabel: 'Restaurant Banner',
+          logoLabel: 'Restaurant Logo (Optional)',
+          bannerLabel: 'Restaurant Banner (Optional)',
           onLogoTap: () => _pickImage(
               ImageSource.gallery, (path) => _restaurantLogoPath = path),
           onBannerTap: () => _pickImage(
               ImageSource.gallery, (path) => _restaurantBannerPath = path),
         ),
         const SizedBox(height: 16),
-        _SectionLabel(label: 'Restaurant Photos '),
+        _SectionLabel(label: 'Restaurant Photos (Optional)'),
         _MultiPhotoUpload(
           photos: _restaurantPhotos,
           onAdd: () => _showImagePickerOptions(
@@ -838,6 +874,14 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
           maxLines: 2,
         ),
         const SizedBox(height: 16),
+        CustomTextField(
+          controller: _areaCtrl,
+          label: 'Area / Locality',
+          hint: 'e.g. Koramangala',
+          required: true,
+          prefixIcon: Icons.map_outlined,
+        ),
+        const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
@@ -851,12 +895,33 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: CustomTextField(
-                controller: _stateCtrl,
-                label: 'State',
-                hint: 'State',
-                required: true,
-                prefixIcon: Icons.map_outlined,
+              child: DropdownButtonFormField<String>(
+                value: _stateCtrl.text.isNotEmpty && _indianStates.contains(_stateCtrl.text) ? _stateCtrl.text : null,
+                items: _indianStates.map((state) {
+                  return DropdownMenuItem(value: state, child: Text(state, overflow: TextOverflow.ellipsis));
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _stateCtrl.text = val);
+                  }
+                },
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'State',
+                  hintText: 'Select State',
+                  prefixIcon: const Icon(Icons.map_outlined, color: kNavyBlue),
+                  filled: true,
+                  fillColor: kWhite,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: kBorderColor),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: kBorderColor),
+                  ),
+                ),
+                validator: (val) => val == null || val.isEmpty ? 'Required' : null,
               ),
             ),
           ],
@@ -1520,15 +1585,16 @@ if (_currentStep == 0 && _profilePhotoPath.isEmpty) {
 // STEP 9 — RESTAURANT SUCCESS SCREEN (StatefulWidget)
 // 5 second loading → fir success + dashboard button
 // ================================================================
-class _RestaurantSuccessScreen extends StatefulWidget {
-  const _RestaurantSuccessScreen();
+class _SuccessScreen extends StatefulWidget {
+  final String? businessId;
+  const _SuccessScreen({this.businessId});
 
   @override
-  State<_RestaurantSuccessScreen> createState() =>
+  State<_SuccessScreen> createState() =>
       _RestaurantSuccessScreenState();
 }
 
-class _RestaurantSuccessScreenState extends State<_RestaurantSuccessScreen> {
+class _RestaurantSuccessScreenState extends State<_SuccessScreen> {
   bool _showLoading = true;
 
   @override
@@ -1750,13 +1816,11 @@ class _RestaurantSuccessScreenState extends State<_RestaurantSuccessScreen> {
             height: 52,
             child: ElevatedButton.icon(
               onPressed: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => const DashboardLayout(
-                      businessType: 'restaurant',
-                    ),
-                  ),
-                );
+                if (widget.businessId != null) {
+                  context.go('/dashboard', extra: widget.businessId);
+                } else {
+                  context.go('/business-type');
+                }
               },
               icon: const Icon(Icons.dashboard_rounded, size: 20),
               label: const Text(
@@ -2462,6 +2526,15 @@ class _PrefilledMobileField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    String displayMobile = mobile;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && user.phoneNumber != null && user.phoneNumber!.isNotEmpty) {
+      displayMobile = user.phoneNumber!;
+      if (displayMobile.startsWith('+91')) {
+        displayMobile = displayMobile.substring(3);
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2504,7 +2577,7 @@ class _PrefilledMobileField extends StatelessWidget {
                   color: kBorderColor,
                   margin: const EdgeInsets.symmetric(horizontal: 12)),
               Expanded(
-                child: Text(mobile,
+                child: Text(displayMobile,
                     style: const TextStyle(
                         color: kTextSecondary,
                         fontSize: 14.5,
@@ -2528,12 +2601,6 @@ class _PrefilledMobileField extends StatelessWidget {
 
 const List<Map<String, String>> _countryCodes = [
   {'flag': '🇮🇳', 'code': '+91',  'name': 'India'},
-  {'flag': '🇺🇸', 'code': '+1',   'name': 'USA'},
-  {'flag': '🇬🇧', 'code': '+44',  'name': 'UK'},
-  {'flag': '🇦🇪', 'code': '+971', 'name': 'UAE'},
-  {'flag': '🇨🇦', 'code': '+1',   'name': 'Canada'},
-  {'flag': '🇦🇺', 'code': '+61',  'name': 'Australia'},
-  {'flag': '🇸🇬', 'code': '+65',  'name': 'Singapore'},
 ];
 
 class _CountryCodeMobileField extends StatelessWidget {
@@ -2599,13 +2666,24 @@ class _CountryCodeMobileField extends StatelessWidget {
             Expanded(
               child: TextFormField(
                 controller: controller,
-                keyboardType: TextInputType.phone,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(10),
+                ],
+                validator: (val) {
+                  if (val != null && val.isNotEmpty && val.length != 10) {
+                    return 'Enter valid 10-digit mobile number';
+                  }
+                  return null;
+                },
                 style: const TextStyle(
                     color: kTextPrimary,
                     fontSize: 14.5,
                     fontWeight: FontWeight.w500),
                 decoration: InputDecoration(
                   hintText: hint,
+                  counterText: '',
                   hintStyle:
                       const TextStyle(color: kTextHint, fontSize: 14),
                   filled: true,

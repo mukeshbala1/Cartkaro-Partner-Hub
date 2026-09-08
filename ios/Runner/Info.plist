@@ -113,6 +113,35 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 
+	<!-- ── Permission Descriptions (REQUIRED by iOS) ─────────────────── -->
+
+	<!-- Camera — used by image_picker (product photos, profile, documents) -->
+	<key>NSCameraUsageDescription</key>
+	<string>CartKaro needs camera access to capture product photos and business documents.</string>
+
+	<!-- Photo Library — used by image_picker (pick existing images) -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>CartKaro needs photo library access to upload product images and documents.</string>
+
+	<!-- Photo Library Add Only — used when saving images -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>CartKaro needs permission to save images to your photo library.</string>
+
+	<!-- Location When In Use — used by geolocator for business address -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>CartKaro uses your location to set your business address accurately.</string>
+
+	<!-- Location Always — required by geolocator plugin declaration -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>CartKaro uses your location to set your business address accurately.</string>
+
+	<!-- Microphone — required by image_picker on some iOS versions -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CartKaro needs microphone access when recording videos for your business profile.</string>
+
+	<!-- Face ID — used by local_auth for secure login -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>CartKaro uses Face ID for quick and secure access to your partner account.</string>
 
 </dict>
 </plist>

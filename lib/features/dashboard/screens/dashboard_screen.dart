@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../../../core/services/auth_service.dart';
 
 import 'create_offer_screen.dart';
 import 'business_settings_screen.dart';
@@ -10,7 +14,7 @@ import '../../auth/screens/business_type_screen.dart' hide BusinessTypeScreen;
 import '../../../models/business_model.dart';
 
 class DashboardScreen extends StatefulWidget {
-  final String businessType;
+  final String? businessId;
   final Function(String) onBusinessChanged;
   final int activeCount; 
   final VoidCallback onAddProductTap;
@@ -20,7 +24,7 @@ class DashboardScreen extends StatefulWidget {
 
   const DashboardScreen({
     Key? key,
-    required this.businessType,
+    this.businessId,
     required this.onBusinessChanged,
     required this.activeCount,
     required this.onAddProductTap,
@@ -35,15 +39,43 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   late BusinessModel _business;
+  bool _isLoading = true;
   bool _isTogglingLive = false;
 
   @override
   void initState() {
     super.initState();
-    _business = MockData.businesses.firstWhere(
-      (b) => b.businessType == widget.businessType,
-      orElse: () => MockData.currentBusiness,
-    );
+    _fetchBusinessData();
+  }
+
+  Future<void> _fetchBusinessData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && widget.businessId != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('businesses').doc(widget.businessId).get();
+        if (doc.exists) {
+          final data = doc.data()!;
+          if (!mounted) return;
+          
+          setState(() {
+            _business = BusinessModel.fromFirestore(data, doc.id);
+            _isLoading = false;
+          });
+          widget.onBusinessChanged(_business.businessType);
+          return;
+        }
+      } catch (e) {
+        debugPrint('Error fetching business data: $e');
+      }
+    }
+    
+    // Fallback to mock if fetch fails or user is null
+    if (!mounted) return;
+    setState(() {
+      _business = BusinessModel.empty();
+      _isLoading = false;
+    });
+    widget.onBusinessChanged(_business.businessType);
   }
 
   String get itemName => _business.itemName;
@@ -63,6 +95,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
     widget.onBusinessChanged(newBusiness.businessType);
   }
 
+  IconData get _businessIcon {
+    switch (_business.businessType) {
+      case 'grocery': return LucideIcons.shoppingCart;
+      case 'restaurant': return LucideIcons.utensilsCrossed;
+      case 'medical': return LucideIcons.pill;
+      default: return LucideIcons.store;
+    }
+  }
+
+  List<Color> get _businessGradient {
+    switch (_business.businessType) {
+      case 'grocery': return [const Color(0xFF16A34A), const Color(0xFF22C55E)]; // Green
+      case 'restaurant': return [const Color(0xFFEA580C), const Color(0xFFF97316)]; // Orange
+      case 'medical': return [const Color(0xFF0284C7), const Color(0xFF0EA5E9)]; // Light Blue
+      default: return [AppColors.kPrimary, AppColors.kPrimary.withOpacity(0.78)];
+    }
+  }
+
+  String get _businessBadgeText {
+    switch (_business.businessType) {
+      case 'grocery': return 'Grocery Partner';
+      case 'restaurant': return 'Restaurant Partner';
+      case 'medical': return 'Medical Partner';
+      default: return 'Partner';
+    }
+  }
+
   Future<void> _onLiveToggleChanged(bool newValue) async {
     if (_business.isLive && newValue == false) {
       final confirmed = await _showGoUnliveDialog();
@@ -75,7 +134,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _isTogglingLive = true;
     });
 
-    final success = await MockData.updateLiveStatus(_business.id, newValue);
+    bool success = false;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && widget.businessId != null) {
+        await FirebaseFirestore.instance.collection('businesses').doc(widget.businessId).update({
+          'isLive': newValue,
+        });
+        success = true;
+      }
+    } catch (e) {
+      debugPrint('Error updating live status: $e');
+    }
+
     if (!mounted) return;
 
     if (success) {
@@ -104,30 +175,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _openBusinessSwitcher() {
-    final approved = MockData.approvedBusinesses;
-    showModalBottomSheet(
+  Future<void> _openBusinessSwitcher() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    
+    // Show a small loading indicator while fetching
+    showDialog(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => _SwitchBusinessSheet(
-        businesses: approved,
-        currentBusinessId: _business.id,
-        onSelect: (b) {
-          Navigator.pop(context);
-          _switchBusiness(b);
-        },
-        onAddNew: () async {
-          Navigator.pop(context); 
-          await Navigator.push(context, MaterialPageRoute(builder: (context) => const BusinessTypeScreen()));
-          setState(() {});
-        },
-      ),
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
     );
+    
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('businesses')
+          .where('ownerUid', isEqualTo: user.uid)
+          .get();
+          
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+      
+      final businesses = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return BusinessModel.fromFirestore(data, doc.id);
+      }).toList();
+      
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (_) => _SwitchBusinessSheet(
+          businesses: businesses,
+          currentBusinessId: _business.id,
+          onSelect: (b) {
+            Navigator.pop(context);
+            context.go('/dashboard', extra: b.id);
+          },
+          onAddNew: () {
+            Navigator.pop(context); 
+            context.go('/business-type');
+          },
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+      debugPrint('Error fetching businesses for switcher: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: AppColors.kBackground,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    
+    if (_business.status == BusinessStatus.pending) {
+      return _buildPendingVerificationView();
+    }
+    
+    if (_business.status == BusinessStatus.rejected) {
+      return _buildRejectedView();
+    }
+    
     return Scaffold(
       backgroundColor: AppColors.kBackground,
       body: SafeArea(
@@ -167,6 +280,167 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildPendingVerificationView() {
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      appBar: AppBar(
+        backgroundColor: AppColors.kBackground,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(LucideIcons.logOut, color: AppColors.kDarkText),
+            onPressed: () async {
+              final hasPin = await AuthService.isPinSet();
+              if (hasPin) {
+                if (mounted) context.go('/pin-login');
+              } else {
+                await FirebaseAuth.instance.signOut();
+                if (mounted) context.go('/login');
+              }
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8EEF5),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.kPrimary, width: 2.5),
+                ),
+                child: const Icon(Icons.hourglass_top_rounded, color: AppColors.kPrimary, size: 52),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'Verification\nUnder Review',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.kDarkText,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your documents and details are currently being verified by our team. This usually takes 24-48 hours.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.kLightText, fontSize: 14, height: 1.55),
+              ),
+              const SizedBox(height: 36),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() => _isLoading = true);
+                    _fetchBusinessData();
+                  },
+                  icon: const Icon(LucideIcons.refreshCw, size: 18),
+                  label: const Text('Refresh Status', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.kPrimary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRejectedView() {
+    return Scaffold(
+      backgroundColor: AppColors.kBackground,
+      appBar: AppBar(
+        backgroundColor: AppColors.kBackground,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(LucideIcons.logOut, color: AppColors.kDarkText),
+            onPressed: () async {
+              final hasPin = await AuthService.isPinSet();
+              if (hasPin) {
+                if (mounted) context.go('/pin-login');
+              } else {
+                await FirebaseAuth.instance.signOut();
+                if (mounted) context.go('/login');
+              }
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.red, width: 2.5),
+                ),
+                child: const Icon(Icons.cancel_outlined, color: Colors.red, size: 52),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'Application Rejected',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.kDarkText,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Unfortunately, your application was rejected. Please contact support for more details.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.kLightText, fontSize: 14, height: 1.55),
+              ),
+              const SizedBox(height: 36),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    // Contact Support action
+                  },
+                  icon: const Icon(LucideIcons.headphones, size: 18),
+                  label: const Text('Contact Support', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.kDarkText,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+
+
   Widget _buildHeader(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -176,8 +450,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('$_greeting 👋', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.kLightText, letterSpacing: 0.2)),
-                const SizedBox(height: 2), 
+                Row(
+                  children: [
+                    Icon(_businessIcon, size: 14, color: AppColors.kPrimary),
+                    const SizedBox(width: 6),
+                    Text('$_greeting 👋', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.kPrimary, letterSpacing: 0.2)),
+                  ],
+                ),
+                const SizedBox(height: 4), 
                 GestureDetector(
                   onTap: _openBusinessSwitcher, 
                   child: Row(
@@ -194,6 +474,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(width: 10), 
           _buildOnlineToggle(),
+          const SizedBox(width: 8),
+          PopupMenuButton<String>(
+            offset: const Offset(0, 45),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: CircleAvatar(
+              radius: 18,
+              backgroundColor: AppColors.kPrimary.withOpacity(0.15),
+              child: const Icon(LucideIcons.user, size: 20, color: AppColors.kPrimary),
+            ),
+            onSelected: (value) async {
+              if (value == 'profile') {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Profile screen coming soon!')),
+                );
+              } else if (value == 'logout') {
+                final hasPin = await AuthService.isPinSet();
+                if (hasPin) {
+                  if (context.mounted) {
+                    context.go('/pin-login');
+                  }
+                } else {
+                  await FirebaseAuth.instance.signOut();
+                  if (context.mounted) {
+                    context.go('/login');
+                  }
+                }
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'profile',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.user, size: 18, color: AppColors.kDarkText),
+                    SizedBox(width: 12),
+                    Text('Profile', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.kDarkText)),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.logOut, size: 18, color: Colors.red),
+                    SizedBox(width: 12),
+                    Text('Logout', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -231,9 +563,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       margin: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [AppColors.kPrimary, AppColors.kPrimary.withOpacity(0.78)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(colors: _businessGradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: AppColors.kPrimary.withOpacity(0.30), blurRadius: 28, offset: const Offset(0, 10))],
+        boxShadow: [BoxShadow(color: _businessGradient[0].withOpacity(0.30), blurRadius: 28, offset: const Offset(0, 10))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -247,9 +579,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Row(
                   children: [
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(20)), child: const Text("Today's Performance", style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white, letterSpacing: 0.4))),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: Colors.white.withOpacity(0.25), borderRadius: BorderRadius.circular(20)), child: Text(_businessBadgeText, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 0.4))),
                     const Spacer(),
-                    Icon(LucideIcons.trendingUp, color: Colors.white.withOpacity(0.7), size: 18),
+                    Icon(LucideIcons.trendingUp, color: Colors.white.withOpacity(0.9), size: 18),
                   ],
                 ),
                 const SizedBox(height: 18),

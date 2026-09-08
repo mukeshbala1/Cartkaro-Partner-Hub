@@ -85,7 +85,7 @@ dependencies:
   # FIREBASE (Future — uncomment when implementing Firestore, Storage, Notifications)
   # ======================
   # firebase_messaging: ^16.3.0
-  # cloud_firestore: ^6.6.0
+  cloud_firestore: ^6.6.0
   # firebase_storage: ^13.4.3
   # flutter_local_notifications: ^22.0.1
 
@@ -130,6 +130,16 @@ dependencies:
 
 
 
+  # ======================
+  # SECURITY / LOCAL AUTH
+  # ======================
+
+  shared_preferences: ^2.3.0   # Store PIN hash locally on device
+  local_auth: ^2.3.0           # Face ID (iOS) / Fingerprint (Android)
+  crypto: ^3.0.3               # SHA-256 PIN hashing
+
+
+
 dev_dependencies:
 
   flutter_test:
@@ -147,3 +157,4 @@ flutter:
 
   assets:
     - assets/logo.png
+    - assets/categories/
