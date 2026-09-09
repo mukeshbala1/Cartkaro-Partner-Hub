@@ -32,8 +32,8 @@ class MapboxLocationPickerCard extends StatefulWidget {
 
 class _MapboxLocationPickerCardState extends State<MapboxLocationPickerCard> {
   final MapController _mapController = MapController();
-  LatLng _centerPosition = const LatLng(20.5937, 78.9629); // Default India center
-  String _currentStyle = 'streets-v12'; // 'streets-v12' or 'satellite-streets-v12' or 'dark-v11'
+  LatLng _centerPosition = const LatLng(20.2961, 85.8245); // Default Odisha, India center
+  String _currentStyle = 'streets-v12';
   bool _isLocating = false;
   bool _isMapInitialized = false;
 
@@ -131,20 +131,27 @@ class _MapboxLocationPickerCardState extends State<MapboxLocationPickerCard> {
         position = await Geolocator.getLastKnownPosition();
       }
 
-      if (position != null) {
-        final newLatLng = LatLng(position.latitude, position.longitude);
-        setState(() {
-          _centerPosition = newLatLng;
-          widget.latCtrl.text = position!.latitude.toStringAsFixed(6);
-          widget.lngCtrl.text = position.longitude.toStringAsFixed(6);
-        });
+      double lat = position?.latitude ?? 20.2961;
+      double lng = position?.longitude ?? 85.8245;
 
-        if (_isMapInitialized) {
-          _mapController.move(newLatLng, 16.5);
-        }
-
-        widget.onLocationSelected(position.latitude, position.longitude);
+      // If emulator returns synthetic California location (37.42... , -122.08...), override to Odisha, India
+      if (lat >= 37.4 && lat <= 37.5 && lng >= -122.1 && lng <= -122.0) {
+        lat = 20.2961;
+        lng = 85.8245;
       }
+
+      final newLatLng = LatLng(lat, lng);
+      setState(() {
+        _centerPosition = newLatLng;
+        widget.latCtrl.text = lat.toStringAsFixed(6);
+        widget.lngCtrl.text = lng.toStringAsFixed(6);
+      });
+
+      if (_isMapInitialized) {
+        _mapController.move(newLatLng, 16.5);
+      }
+
+      widget.onLocationSelected(lat, lng);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
