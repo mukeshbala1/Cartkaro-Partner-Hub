@@ -3092,11 +3092,13 @@ class _LocationPickerCard extends StatelessWidget {
   final TextEditingController latCtrl;
   final TextEditingController lngCtrl;
   final VoidCallback onFetchLocation;
+  final bool isLoading;
 
   const _LocationPickerCard({
     required this.latCtrl,
     required this.lngCtrl,
     required this.onFetchLocation,
+    this.isLoading = false,
   });
 
   @override
@@ -3166,12 +3168,21 @@ class _LocationPickerCard extends StatelessWidget {
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
-              onPressed: onFetchLocation,
-              icon:
-                  const Icon(Icons.my_location_rounded, size: 20, color: kWhite),
-              label: const Text(
-                '📍 Fetch Current Location',
-                style: TextStyle(
+              onPressed: isLoading ? null : onFetchLocation,
+              icon: isLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        color: kWhite,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(Icons.my_location_rounded,
+                      size: 20, color: kWhite),
+              label: Text(
+                isLoading ? 'Detecting GPS Location...' : '📍 Fetch Current Location',
+                style: const TextStyle(
                   color: kWhite,
                   fontWeight: FontWeight.w600,
                   fontSize: 14.5,
@@ -3179,6 +3190,7 @@ class _LocationPickerCard extends StatelessWidget {
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: kNavyBlue,
+                disabledBackgroundColor: kNavyBlue.withValues(alpha: 0.7),
                 elevation: 2,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
