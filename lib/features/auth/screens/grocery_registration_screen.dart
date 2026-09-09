@@ -152,32 +152,34 @@ class _GroceryRegistrationScreenState
   Future<Map<String, String>> _performReverseGeocoding(double lat, double lng) async {
     Map<String, String> geo = {};
 
+    // 1. Try native geocoding package first
     try {
       List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
       if (placemarks.isNotEmpty) {
         Placemark place = placemarks.first;
 
-        List<String> streetParts = [];
-        if (place.name != null && place.name!.isNotEmpty && place.name != place.street) {
-          streetParts.add(place.name!);
-        }
-        if (place.subThoroughfare != null && place.subThoroughfare!.isNotEmpty) {
-          streetParts.add(place.subThoroughfare!);
-        }
-        if (place.thoroughfare != null && place.thoroughfare!.isNotEmpty) {
-          streetParts.add(place.thoroughfare!);
-        }
-        if (place.street != null && place.street!.isNotEmpty && !streetParts.contains(place.street)) {
-          streetParts.add(place.street!);
+        List<String> addressParts = [];
+        for (String? s in [
+          place.name,
+          place.subThoroughfare,
+          place.thoroughfare,
+          place.street,
+          place.subLocality,
+          place.locality,
+        ]) {
+          if (s != null && s.trim().isNotEmpty) {
+            String val = s.trim();
+            if (!addressParts.any((item) => item.toLowerCase() == val.toLowerCase())) {
+              addressParts.add(val);
+            }
+          }
         }
 
-        String fullAddress = streetParts.join(', ');
-        if (fullAddress.isEmpty) {
-          fullAddress = [place.subLocality, place.locality].where((s) => s != null && s.isNotEmpty).join(', ');
-        }
+        String fullAddress = addressParts.join(', ');
 
         String area = [place.subLocality, place.locality]
-            .where((s) => s != null && s.isNotEmpty)
+            .where((s) => s != null && s.trim().isNotEmpty)
+            .map((s) => s!.trim())
             .toSet()
             .join(', ');
 
@@ -199,7 +201,8 @@ class _GroceryRegistrationScreenState
       debugPrint('Native geocoding failed: $e');
     }
 
-    if (geo.isEmpty || (geo['address']?.isEmpty ?? true)) {
+    // 2. HTTP Fallback (OpenStreetMap Nominatim API) if native geocoding returns empty or brief address
+    if (geo.isEmpty || (geo['address']?.trim().length ?? 0) < 5) {
       try {
         final client = HttpClient();
         client.connectionTimeout = const Duration(seconds: 5);
@@ -213,29 +216,31 @@ class _GroceryRegistrationScreenState
           final responseBody = await response.transform(utf8.decoder).join();
           final data = jsonDecode(responseBody) as Map<String, dynamic>;
           final address = data['address'] as Map<String, dynamic>? ?? {};
+          final String displayName = data['display_name'] as String? ?? '';
 
-          String road = address['road'] ?? address['suburb'] ?? address['neighbourhood'] ?? '';
-          String house = address['house_number'] ?? address['building'] ?? '';
-          String fullAddr = [house, road].where((s) => s.isNotEmpty).join(', ');
-          if (fullAddr.isEmpty && data['display_name'] != null) {
-            List<String> parts = (data['display_name'] as String).split(',');
-            fullAddr = parts.take(3).join(', ').trim();
+          String house = address['house_number'] ?? address['building'] ?? address['amenity'] ?? address['shop'] ?? address['office'] ?? '';
+          String road = address['road'] ?? address['pedestrian'] ?? address['footway'] ?? address['path'] ?? '';
+          String suburb = address['suburb'] ?? address['neighbourhood'] ?? address['residential'] ?? '';
+          String subdistrict = address['subdistrict'] ?? address['district'] ?? '';
+
+          List<String> addrParts = [];
+          for (String s in [house, road, suburb, subdistrict]) {
+            if (s.trim().isNotEmpty && !addrParts.any((item) => item.toLowerCase() == s.trim().toLowerCase())) {
+              addrParts.add(s.trim());
+            }
+          }
+          String fullAddr = addrParts.join(', ');
+
+          if (fullAddr.isEmpty || fullAddr.length < 5) {
+            if (displayName.isNotEmpty) {
+              List<String> parts = displayName.split(',').map((e) => e.trim()).toList();
+              if (parts.length > 2) parts.removeLast(); // Remove country
+              fullAddr = parts.join(', ');
+            }
           }
 
-          String area = address['suburb'] ??
-              address['neighbourhood'] ??
-              address['residential'] ??
-              address['subdistrict'] ??
-              address['district'] ??
-              '';
-
-          String city = address['city'] ??
-              address['town'] ??
-              address['village'] ??
-              address['county'] ??
-              address['state_district'] ??
-              '';
-
+          String area = suburb.isNotEmpty ? suburb : subdistrict;
+          String city = address['city'] ?? address['town'] ?? address['village'] ?? address['county'] ?? address['state_district'] ?? '';
           String state = address['state'] ?? '';
           String pincode = address['postcode'] ?? '';
 
