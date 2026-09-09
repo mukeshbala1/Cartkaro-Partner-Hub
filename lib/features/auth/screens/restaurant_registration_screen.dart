@@ -21,6 +21,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/services/mapbox_service.dart';
+import '../widgets/mapbox_location_picker.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -157,9 +159,13 @@ class _RestaurantRegistrationScreenState
   // GPS — locationSettings explicitly pass karo
   // ─────────────────────────────────────────
   Future<Map<String, String>> _performReverseGeocoding(double lat, double lng) async {
-    Map<String, String> geo = {};
+    // 1. Try Mapbox Places API reverse geocoding first
+    Map<String, String> geo = await MapboxService.reverseGeocode(lat, lng);
+    if (geo.isNotEmpty && (geo['address']?.trim().length ?? 0) >= 5) {
+      return geo;
+    }
 
-    // 1. Try native geocoding package first
+    // 2. Try native geocoding package fallback
     try {
       List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
       if (placemarks.isNotEmpty) {
@@ -206,62 +212,6 @@ class _RestaurantRegistrationScreenState
       }
     } catch (e) {
       debugPrint('Native geocoding failed: $e');
-    }
-
-    // 2. HTTP Fallback (OpenStreetMap Nominatim API) if native geocoding returns empty or brief address
-    if (geo.isEmpty || (geo['address']?.trim().length ?? 0) < 5) {
-      try {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 5);
-        final request = await client.getUrl(Uri.parse(
-          'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&zoom=18&addressdetails=1',
-        ));
-        request.headers.set('User-Agent', 'CartKaroPartnerHub/1.0');
-        final response = await request.close();
-
-        if (response.statusCode == 200) {
-          final responseBody = await response.transform(utf8.decoder).join();
-          final data = jsonDecode(responseBody) as Map<String, dynamic>;
-          final address = data['address'] as Map<String, dynamic>? ?? {};
-          final String displayName = data['display_name'] as String? ?? '';
-
-          String house = address['house_number'] ?? address['building'] ?? address['amenity'] ?? address['shop'] ?? address['office'] ?? '';
-          String road = address['road'] ?? address['pedestrian'] ?? address['footway'] ?? address['path'] ?? '';
-          String suburb = address['suburb'] ?? address['neighbourhood'] ?? address['residential'] ?? '';
-          String subdistrict = address['subdistrict'] ?? address['district'] ?? '';
-
-          List<String> addrParts = [];
-          for (String s in [house, road, suburb, subdistrict]) {
-            if (s.trim().isNotEmpty && !addrParts.any((item) => item.toLowerCase() == s.trim().toLowerCase())) {
-              addrParts.add(s.trim());
-            }
-          }
-          String fullAddr = addrParts.join(', ');
-
-          if (fullAddr.isEmpty || fullAddr.length < 5) {
-            if (displayName.isNotEmpty) {
-              List<String> parts = displayName.split(',').map((e) => e.trim()).toList();
-              if (parts.length > 2) parts.removeLast(); // Remove country
-              fullAddr = parts.join(', ');
-            }
-          }
-
-          String area = suburb.isNotEmpty ? suburb : subdistrict;
-          String city = address['city'] ?? address['town'] ?? address['village'] ?? address['county'] ?? address['state_district'] ?? '';
-          String state = address['state'] ?? '';
-          String pincode = address['postcode'] ?? '';
-
-          geo = {
-            'address': fullAddr.isNotEmpty ? fullAddr : displayName,
-            'area': area,
-            'city': city,
-            'state': state,
-            'pincode': pincode,
-          };
-        }
-      } catch (e) {
-        debugPrint('HTTP geocoding fallback error: $e');
-      }
     }
 
     return geo;
@@ -941,10 +891,30 @@ class _RestaurantRegistrationScreenState
         ),
         const SizedBox(height: 20),
         _SectionLabel(label: 'GPS Location & Auto-Address'),
-        _LocationPickerCard(
+        MapboxLocationPickerCard(
           latCtrl: _latCtrl,
           lngCtrl: _lngCtrl,
-          onFetchLocation: _fetchRealLocation,
+          onLocationSelected: (lat, lng) async {
+            Map<String, String> geo = await _performReverseGeocoding(lat, lng);
+            if (!mounted) return;
+            setState(() {
+              if ((geo['address'] ?? '').isNotEmpty) _restaurantAddressCtrl.text = geo['address']!;
+              if ((geo['area'] ?? '').isNotEmpty) _areaCtrl.text = geo['area']!;
+              if ((geo['city'] ?? '').isNotEmpty) _cityCtrl.text = geo['city']!;
+              if ((geo['state'] ?? '').isNotEmpty) {
+                String rawState = geo['state']!;
+                String matchedState = _indianStates.firstWhere(
+                  (s) => s.toLowerCase() == rawState.toLowerCase(),
+                  orElse: () => _indianStates.firstWhere(
+                    (s) => s.toLowerCase().contains(rawState.toLowerCase()) || rawState.toLowerCase().contains(s.toLowerCase()),
+                    orElse: () => rawState,
+                  ),
+                );
+                _stateCtrl.text = matchedState;
+              }
+              if ((geo['pincode'] ?? '').isNotEmpty) _pincodeCtrl.text = geo['pincode']!;
+            });
+          },
           isLoading: _isFetchingLocation,
         ),
         const SizedBox(height: 20),
