@@ -8,6 +8,7 @@
 // ============================================================
 
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -148,128 +149,236 @@ class _GroceryRegistrationScreenState
   // ─────────────────────────────────────────
   // FIX 4: GPS — locationSettings explicitly pass karo
   // ─────────────────────────────────────────
+  Future<Map<String, String>> _performReverseGeocoding(double lat, double lng) async {
+    Map<String, String> geo = {};
+
+    try {
+      List<Placemark> placemarks = await placemarkFromCoordinates(lat, lng);
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+
+        List<String> streetParts = [];
+        if (place.name != null && place.name!.isNotEmpty && place.name != place.street) {
+          streetParts.add(place.name!);
+        }
+        if (place.subThoroughfare != null && place.subThoroughfare!.isNotEmpty) {
+          streetParts.add(place.subThoroughfare!);
+        }
+        if (place.thoroughfare != null && place.thoroughfare!.isNotEmpty) {
+          streetParts.add(place.thoroughfare!);
+        }
+        if (place.street != null && place.street!.isNotEmpty && !streetParts.contains(place.street)) {
+          streetParts.add(place.street!);
+        }
+
+        String fullAddress = streetParts.join(', ');
+        if (fullAddress.isEmpty) {
+          fullAddress = [place.subLocality, place.locality].where((s) => s != null && s.isNotEmpty).join(', ');
+        }
+
+        String area = [place.subLocality, place.locality]
+            .where((s) => s != null && s.isNotEmpty)
+            .toSet()
+            .join(', ');
+
+        String city = place.locality ?? place.subAdministrativeArea ?? place.administrativeArea ?? '';
+        String state = place.administrativeArea ?? '';
+        String pincode = place.postalCode ?? '';
+
+        if (fullAddress.isNotEmpty || city.isNotEmpty) {
+          geo = {
+            'address': fullAddress,
+            'area': area,
+            'city': city,
+            'state': state,
+            'pincode': pincode,
+          };
+        }
+      }
+    } catch (e) {
+      debugPrint('Native geocoding failed: $e');
+    }
+
+    if (geo.isEmpty || (geo['address']?.isEmpty ?? true)) {
+      try {
+        final client = HttpClient();
+        client.connectionTimeout = const Duration(seconds: 5);
+        final request = await client.getUrl(Uri.parse(
+          'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&zoom=18&addressdetails=1',
+        ));
+        request.headers.set('User-Agent', 'CartKaroPartnerHub/1.0');
+        final response = await request.close();
+
+        if (response.statusCode == 200) {
+          final responseBody = await response.transform(utf8.decoder).join();
+          final data = jsonDecode(responseBody) as Map<String, dynamic>;
+          final address = data['address'] as Map<String, dynamic>? ?? {};
+
+          String road = address['road'] ?? address['suburb'] ?? address['neighbourhood'] ?? '';
+          String house = address['house_number'] ?? address['building'] ?? '';
+          String fullAddr = [house, road].where((s) => s.isNotEmpty).join(', ');
+          if (fullAddr.isEmpty && data['display_name'] != null) {
+            List<String> parts = (data['display_name'] as String).split(',');
+            fullAddr = parts.take(3).join(', ').trim();
+          }
+
+          String area = address['suburb'] ??
+              address['neighbourhood'] ??
+              address['residential'] ??
+              address['subdistrict'] ??
+              address['district'] ??
+              '';
+
+          String city = address['city'] ??
+              address['town'] ??
+              address['village'] ??
+              address['county'] ??
+              address['state_district'] ??
+              '';
+
+          String state = address['state'] ?? '';
+          String pincode = address['postcode'] ?? '';
+
+          geo = {
+            'address': fullAddr,
+            'area': area,
+            'city': city,
+            'state': state,
+            'pincode': pincode,
+          };
+        }
+      } catch (e) {
+        debugPrint('HTTP geocoding fallback error: $e');
+      }
+    }
+
+    return geo;
+  }
+
+  bool _isFetchingLocation = false;
+
   Future<void> _fetchRealLocation() async {
-    // Step 1: Service enabled hai?
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
+    if (_isFetchingLocation) return;
+    setState(() => _isFetchingLocation = true);
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Your GPS is disabled. Please enable it in settings.')),
+          );
+          await Geolocator.openLocationSettings();
+        }
+        setState(() => _isFetchingLocation = false);
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Location permission denied.')),
+            );
+          }
+          setState(() => _isFetchingLocation = false);
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Location permission permanently denied. Enable in App Settings.'),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: Geolocator.openAppSettings,
+                textColor: Colors.white,
+              ),
+            ),
+          );
+        }
+        setState(() => _isFetchingLocation = false);
+        return;
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Your GPS is disabled, Please enable it.'),
+            content: Text('📍 Detecting GPS Location...'),
+            duration: Duration(seconds: 2),
           ),
         );
-        await Geolocator.openLocationSettings();
       }
-      return;
-    }
 
-    // Step 2: Permission check
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
+      Position? position;
+      try {
+        position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+          timeLimit: const Duration(seconds: 6),
+        );
+      } catch (_) {
+        position = await Geolocator.getLastKnownPosition();
+        if (position == null) {
+          try {
+            position = await Geolocator.getCurrentPosition(
+              desiredAccuracy: LocationAccuracy.low,
+              timeLimit: const Duration(seconds: 5),
+            );
+          } catch (e) {
+            debugPrint('GPS fetch failed: $e');
+          }
+        }
+      }
+
+      if (position == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Location permission denied.')),
+            const SnackBar(content: Text('Unable to detect GPS location. Please enter manually.')),
           );
         }
+        setState(() => _isFetchingLocation = false);
         return;
       }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Location permission permanently denied. App Settings se enable karo.',
-            ),
-            action: SnackBarAction(
-              label: 'Settings',
-              onPressed: Geolocator.openAppSettings,
-              textColor: Colors.white,
-            ),
-          ),
-        );
-      }
-      return;
-    }
-
-    // Step 3: Fetching indicator
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('📍 Fatching Your Location.')),
-      );
-    }
-
-    try {
-      // ✅ FIX: LocationSettings explicitly pass karo — purana timeLimit deprecated tha
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 15),
-      );
 
       if (!mounted) return;
 
       setState(() {
-        _latCtrl.text = position.latitude.toStringAsFixed(6);
+        _latCtrl.text = position!.latitude.toStringAsFixed(6);
         _lngCtrl.text = position.longitude.toStringAsFixed(6);
       });
 
-      // Reverse geocoding se address fill karo
-      try {
-        List<Placemark> placemarks = await placemarkFromCoordinates(
-          position.latitude,
-          position.longitude,
-        );
-        if (placemarks.isNotEmpty && mounted) {
-          Placemark place = placemarks.first;
-          setState(() {
-            _storeAddressCtrl.text =
-                [place.street, place.subLocality, place.locality]
-                    .where((s) => s != null && s.isNotEmpty)
-                    .join(', ');
-            _cityCtrl.text =
-                place.locality ?? place.subAdministrativeArea ?? '';
-            _stateCtrl.text = place.administrativeArea ?? '';
-            _pincodeCtrl.text = place.postalCode ?? '';
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('✅ Location and address filled.'),
-                backgroundColor: kSuccessColor,
-              ),
-            );
-          }
-        }
-      } catch (_) {
-        // Reverse geocoding fail — lat/lng toh save hai
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Location and address not filled.'),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      // Fallback: Last known position
-      Position? lastPos = await Geolocator.getLastKnownPosition();
-      if (lastPos != null && mounted) {
-        setState(() {
-          _latCtrl.text = lastPos.latitude.toStringAsFixed(6);
-          _lngCtrl.text = lastPos.longitude.toStringAsFixed(6);
-        });
+      Map<String, String> geo = await _performReverseGeocoding(position.latitude, position.longitude);
+
+      if (!mounted) return;
+
+      setState(() {
+        if ((geo['address'] ?? '').isNotEmpty) _storeAddressCtrl.text = geo['address']!;
+        if ((geo['city'] ?? '').isNotEmpty) _cityCtrl.text = geo['city']!;
+        if ((geo['state'] ?? '').isNotEmpty) _stateCtrl.text = geo['state']!;
+        if ((geo['pincode'] ?? '').isNotEmpty) _pincodeCtrl.text = geo['pincode']!;
+      });
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('We use last known location.'),
+            content: Text('✅ GPS detected & address auto-filled!'),
+            backgroundColor: kSuccessColor,
           ),
         );
-      } else if (mounted) {
+      }
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Location error: $e')),
+          SnackBar(content: Text('GPS error: $e')),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isFetchingLocation = false);
       }
     }
   }
@@ -856,29 +965,6 @@ class _GroceryRegistrationScreenState
       subtitle: 'Help customers find and recognise your store',
       icon: Icons.storefront_outlined,
       children: [
-        _SectionLabel(label: 'Store Branding'),
-        _BannerLogoUploadRow(
-          logoPath: _storeLogoPath,
-          bannerPath: _storeBannerPath,
-          onLogoTap: () =>
-              _pickImage(ImageSource.gallery, (path) => _storeLogoPath = path),
-          onBannerTap: () => _pickImage(
-              ImageSource.gallery, (path) => _storeBannerPath = path),
-        ),
-        const SizedBox(height: 16),
-        _SectionLabel(label: 'Store Photos'),
-        _MultiPhotoUpload(
-          photos: _storePhotos,
-          onAdd: () => _showImagePickerOptions(
-          (path) {
-            setState(() {
-              _storePhotos.add(path);
-            });
-          },
-        ),
-          onRemove: (i) => setState(() => _storePhotos.removeAt(i)),
-        ),
-        const SizedBox(height: 20),
         _SectionLabel(label: 'Store Information'),
         CustomTextField(
           controller: _storeNameCtrl,
@@ -887,7 +973,15 @@ class _GroceryRegistrationScreenState
           required: true,
           prefixIcon: Icons.store_outlined,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
+        _SectionLabel(label: 'GPS Location & Auto-Address'),
+        _LocationPickerCard(
+          latCtrl: _latCtrl,
+          lngCtrl: _lngCtrl,
+          onFetchLocation: _fetchRealLocation,
+          isLoading: _isFetchingLocation,
+        ),
+        const SizedBox(height: 20),
         _SectionLabel(label: 'Store Address'),
         CustomTextField(
           controller: _storeAddressCtrl,
@@ -931,11 +1025,27 @@ class _GroceryRegistrationScreenState
           keyboardType: TextInputType.number,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'GPS Location'),
-        _LocationPickerCard(
-          latCtrl: _latCtrl,
-          lngCtrl: _lngCtrl,
-          onFetchLocation: _fetchRealLocation,
+        _SectionLabel(label: 'Store Branding'),
+        _BannerLogoUploadRow(
+          logoPath: _storeLogoPath,
+          bannerPath: _storeBannerPath,
+          onLogoTap: () =>
+              _pickImage(ImageSource.gallery, (path) => _storeLogoPath = path),
+          onBannerTap: () => _pickImage(
+              ImageSource.gallery, (path) => _storeBannerPath = path),
+        ),
+        const SizedBox(height: 16),
+        _SectionLabel(label: 'Store Photos'),
+        _MultiPhotoUpload(
+          photos: _storePhotos,
+          onAdd: () => _showImagePickerOptions(
+          (path) {
+            setState(() {
+              _storePhotos.add(path);
+            });
+          },
+        ),
+          onRemove: (i) => setState(() => _storePhotos.removeAt(i)),
         ),
         const SizedBox(height: 8),
       ],
@@ -3107,59 +3217,109 @@ class _LocationPickerCard extends StatelessWidget {
   final TextEditingController latCtrl;
   final TextEditingController lngCtrl;
   final VoidCallback onFetchLocation;
+  final bool isLoading;
 
   const _LocationPickerCard({
     required this.latCtrl,
     required this.lngCtrl,
     required this.onFetchLocation,
+    this.isLoading = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bool hasLocation =
+        latCtrl.text.isNotEmpty && lngCtrl.text.isNotEmpty;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: kWhite,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: kBorderColor),
+        color: kOffWhite,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: hasLocation ? kNavyBlue : kBorderColor,
+          width: hasLocation ? 1.5 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.map_rounded, color: kNavyBlue, size: 20),
-              SizedBox(width: 10),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: kNavyBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.gps_fixed_rounded,
+                    color: kNavyBlue, size: 22),
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  'Google Map Location',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: kTextPrimary,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'GPS Location & Auto-Fill',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: kTextPrimary,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Detect GPS to auto-fill address, city & pincode',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: kTextSecondary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(' *',
-                  style: TextStyle(
-                      color: kErrorColor, fontSize: 14)),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: onFetchLocation,
-              icon: const Icon(Icons.my_location_rounded, size: 18),
-              label: const Text('Use Current Location'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: kNavyBlue,
-                side: const BorderSide(
-                    color: kNavyBlue, width: 1.5),
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: isLoading ? null : onFetchLocation,
+              icon: isLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        color: kWhite,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(Icons.my_location_rounded,
+                      size: 20, color: kWhite),
+              label: Text(
+                isLoading ? 'Detecting GPS Location...' : '📍 Fetch Current Location',
+                style: const TextStyle(
+                  color: kWhite,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14.5,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kNavyBlue,
+                disabledBackgroundColor: kNavyBlue.withValues(alpha: 0.7),
+                elevation: 2,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
@@ -3168,36 +3328,43 @@ class _LocationPickerCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _CoordField(
-                    controller: latCtrl, label: 'Latitude'),
+                  controller: latCtrl,
+                  label: 'Latitude',
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _CoordField(
-                    controller: lngCtrl, label: 'Longitude'),
+                  controller: lngCtrl,
+                  label: 'Longitude',
+                ),
               ),
             ],
           ),
-          if (latCtrl.text.isNotEmpty &&
-              lngCtrl.text.isNotEmpty) ...[
-            const SizedBox(height: 12),
+          if (hasLocation) ...[
+            const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: kBlueAccent,
-                borderRadius: BorderRadius.circular(8),
+                color: kSuccessColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: kSuccessColor.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: const [
                   Icon(Icons.check_circle_rounded,
-                      color: kNavyBlue, size: 15),
-                  SizedBox(width: 8),
-                  Text(
-                    'Location captured successfully',
-                    style: TextStyle(
-                      color: kNavyBlueDark,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                      color: kSuccessColor, size: 18),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '✅ GPS Captured — Address, Area & Pincode Auto-Filled',
+                      style: TextStyle(
+                        color: kSuccessColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
