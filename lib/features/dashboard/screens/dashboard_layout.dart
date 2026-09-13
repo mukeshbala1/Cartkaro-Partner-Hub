@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive.dart';
 import '../../../core/services/auth_service.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 // Ye 4 files import karna zaroori hai
 import 'dashboard_screen.dart';

@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/constants/app_colors.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/services/auth_service.dart';
 
 class BusinessSelectorScreen extends StatefulWidget {

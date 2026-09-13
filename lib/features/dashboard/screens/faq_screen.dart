@@ -14,7 +14,7 @@
 // ══════════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 class _Palette {
   static const Color primary       = Color.fromARGB(255, 34, 53, 84);
