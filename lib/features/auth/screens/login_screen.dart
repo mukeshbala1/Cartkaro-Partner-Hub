@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -389,49 +388,29 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handlePostAuthNavigation() async {
-    final hasPin = await AuthService.isPinSet();
-    if (!mounted) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) context.go('/login');
+      return;
+    }
+
+    bool hasPin = await AuthService.isPinSet();
     if (!hasPin) {
+      // Check cloud in case user reinstalled the app
+      hasPin = await AuthService.syncFromCloud(user.uid);
+    }
+
+    if (!mounted) return;
+
+    if (!hasPin) {
+      // Truly first-time user: needs to create a PIN
       context.go('/pin-setup');
       return;
     }
 
-    final savedBusinessId = await AuthService.getActiveBusinessId();
-    if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
-      if (mounted) context.go('/dashboard', extra: savedBusinessId);
-      return;
-    }
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      try {
-        final querySnapshot = await FirebaseFirestore.instance
-            .collection('businesses')
-            .where('ownerUid', isEqualTo: user.uid)
-            .get()
-            .timeout(const Duration(seconds: 2));
-
-        if (!mounted) return;
-
-        if (querySnapshot.docs.isEmpty) {
-          _transitionTo(_Step.success);
-          return;
-        } else if (querySnapshot.docs.length == 1) {
-          final bId = querySnapshot.docs.first.id;
-          await AuthService.saveActiveBusinessId(bId);
-          if (mounted) context.go('/dashboard', extra: bId);
-          return;
-        } else {
-          context.go('/business-selector');
-          return;
-        }
-      } catch (e) {
-        debugPrint('Error checking businesses: $e');
-      }
-    }
-
-    if (!mounted) return;
-    _transitionTo(_Step.success);
+    // Existing partner on reinstalled app:
+    // Route to /pin-login so they can enter their PIN or unlock with Fingerprint/Face ID!
+    context.go('/pin-login');
   }
 
   void _transitionTo(_Step next) {
@@ -1093,35 +1072,7 @@ class _LoginScreenState extends State<LoginScreen>
         _buildCtaButton(
           label: 'Continue',
           icon: LucideIcons.arrowRight,
-          onTap: () async {
-            final hasPin = await AuthService.isPinSet();
-            if (!mounted) return;
-            if (!hasPin) {
-              context.go('/pin-setup');
-              return;
-            }
-            final user = FirebaseAuth.instance.currentUser;
-            if (user != null) {
-              try {
-                final snap = await FirebaseFirestore.instance
-                    .collection('businesses')
-                    .where('ownerUid', isEqualTo: user.uid)
-                    .get();
-                if (!mounted) return;
-                if (snap.docs.isEmpty) {
-                  context.go('/business-type');
-                } else if (snap.docs.length == 1) {
-                  context.go('/dashboard', extra: snap.docs.first.id);
-                } else {
-                  context.go('/business-selector');
-                }
-                return;
-              } catch (e) {
-                debugPrint('Error navigating from success step: $e');
-              }
-            }
-            if (mounted) context.go('/business-type');
-          },
+          onTap: () => _handlePostAuthNavigation(),
         ),
         const SizedBox(height: 16),
         TextButton(

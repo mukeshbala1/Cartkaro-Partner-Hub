@@ -17,7 +17,14 @@ import '../../features/auth/screens/reset_pin_screen.dart';
 import '../../features/auth/screens/pin_setup_screen.dart';
 
 // Routes that do NOT require authentication
-const _publicRoutes = ['/splash', '/login', '/pin-login', '/reset-pin', '/pin-setup'];
+const _publicRoutes = [
+  '/',
+  '/splash',
+  '/login',
+  '/pin-login',
+  '/reset-pin',
+  '/pin-setup',
+];
 
 class AppRouter {
   static final router = GoRouter(
@@ -27,10 +34,15 @@ class AppRouter {
     // If the user is not logged in and tries to access a protected
     // route (dashboard, registration, business-type), redirect to /login.
     redirect: (context, state) {
-      final loggedIn = FirebaseAuth.instance.currentUser != null;
-      final isPublic = _publicRoutes.contains(state.matchedLocation);
+      final location = state.matchedLocation;
+      final isPublic = _publicRoutes.contains(location);
 
-      if (!loggedIn && !isPublic) {
+      if (isPublic) {
+        return null; // allow public routes (including splash)
+      }
+
+      final loggedIn = FirebaseAuth.instance.currentUser != null;
+      if (!loggedIn) {
         return '/login';
       }
       return null; // allow navigation

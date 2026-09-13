@@ -270,6 +270,7 @@ class _PinSetupScreenState extends State<PinSetupScreen>
         } else if (snap.docs.length == 1) {
           final bId = snap.docs.first.id;
           await AuthService.saveActiveBusinessId(bId);
+          if (!mounted) return;
           context.go('/dashboard', extra: bId);
         } else {
           context.go('/business-selector');
@@ -592,38 +593,28 @@ class _PinSetupScreenState extends State<PinSetupScreen>
                       fit: BoxFit.scaleDown,
                       child: Column(
                         children: [
-                        for (final row in [
-                          [
-                            {'d': '1', 'sub': ''},
-                            {'d': '2', 'sub': 'ABC'},
-                            {'d': '3', 'sub': 'DEF'},
-                          ],
-                          [
-                            {'d': '4', 'sub': 'GHI'},
-                            {'d': '5', 'sub': 'JKL'},
-                            {'d': '6', 'sub': 'MNO'},
-                          ],
-                          [
-                            {'d': '7', 'sub': 'PQRS'},
-                            {'d': '8', 'sub': 'TUV'},
-                            {'d': '9', 'sub': 'WXYZ'},
-                          ],
-                          [
-                            {'d': '', 'sub': ''},
-                            {'d': '0', 'sub': '+'},
-                            {'d': '⌫', 'sub': ''},
-                          ],
-                        ])
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: row.map((k) => _buildNumpadKey(k['d']!, k['sub']!)).toList(),
+                          for (final row in [
+                            ['1', '2', '3'],
+                            ['4', '5', '6'],
+                            ['7', '8', '9'],
+                            ['', '0', '⌫'],
+                          ])
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildNumpadKey(row[0]),
+                                  const SizedBox(width: 18),
+                                  _buildNumpadKey(row[1]),
+                                  const SizedBox(width: 18),
+                                  _buildNumpadKey(row[2]),
+                                ],
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
             ),
           ],
         ),
@@ -634,7 +625,7 @@ class _PinSetupScreenState extends State<PinSetupScreen>
     ));
   }
 
-  Widget _buildNumpadKey(String digit, String sub) {
+  Widget _buildNumpadKey(String digit) {
     if (digit.isEmpty) {
       return const SizedBox(width: 76, height: 64);
     }
@@ -660,29 +651,13 @@ class _PinSetupScreenState extends State<PinSetupScreen>
                   color: Color(0xFF0F172A),
                   size: 24,
                 )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      digit,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
-                        height: 1.1,
-                      ),
-                    ),
-                    if (sub.isNotEmpty)
-                      Text(
-                        sub,
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF334155),
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                  ],
+              : Text(
+                  digit,
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0F172A),
+                  ),
                 ),
         ),
       ),

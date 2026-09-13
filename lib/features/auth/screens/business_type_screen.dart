@@ -196,42 +196,7 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
                         ),
                       );
                     }),
-                  const SizedBox(height: 20),
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x04000000),
-                            blurRadius: 8,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(LucideIcons.store, size: 14, color: AppColors.kPrimary),
-                          SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              'You can add more store categories or branches anytime',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                color: Color(0xFF475569),
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                 ],
               ),
             ),

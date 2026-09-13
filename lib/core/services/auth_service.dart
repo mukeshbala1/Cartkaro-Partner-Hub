@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 /// Device-specific biometric kind for standard OS presentation
 enum BiometricDeviceKind {
@@ -57,12 +59,75 @@ class AuthService {
     return digest.toString();
   }
 
-  // ─── PIN Storage ────────────────────────────────────────────────
+  // ─── PIN Storage & Cloud Sync ───────────────────────────────────
 
-  /// Save a new 4-digit PIN (stored as SHA-256 hash).
-  static Future<void> savePin(String pin) async {
+  /// Save a new 4-digit PIN (stored as SHA-256 hash locally and synced to Firestore).
+  static Future<void> savePin(
+    String pin, {
+    String? uid,
+    bool? isBiometricEnabled,
+  }) async {
+    final hashed = _hashPin(pin);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_pinKey, _hashPin(pin));
+    await prefs.setString(_pinKey, hashed);
+
+    // Sync to Firestore under partners/{uid} so PIN survives app reinstallation
+    final targetUid = uid ?? FirebaseAuth.instance.currentUser?.uid;
+    if (targetUid != null && targetUid.isNotEmpty) {
+      try {
+        final Map<String, dynamic> updateData = {
+          'pinHash': hashed,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        if (isBiometricEnabled != null) {
+          updateData['isBiometricEnabled'] = isBiometricEnabled;
+          await prefs.setBool(_biometricEnabledKey, isBiometricEnabled);
+        }
+        final phone = FirebaseAuth.instance.currentUser?.phoneNumber;
+        if (phone != null && phone.isNotEmpty) {
+          updateData['phoneNumber'] = phone;
+        }
+
+        await FirebaseFirestore.instance
+            .collection('partners')
+            .doc(targetUid)
+            .set(updateData, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('⚠️ Error syncing PIN to Firestore: $e');
+      }
+    }
+  }
+
+  /// Syncs user PIN & biometric preferences from Firestore down to this device.
+  /// Returns true if a valid PIN hash was recovered from cloud.
+  static Future<bool> syncFromCloud(String uid) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('partners')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 4));
+
+      if (!doc.exists || doc.data() == null) {
+        return false;
+      }
+
+      final data = doc.data()!;
+      final cloudPinHash = data['pinHash'] as String?;
+      final cloudBioEnabled = data['isBiometricEnabled'] as bool?;
+
+      if (cloudPinHash != null && cloudPinHash.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_pinKey, cloudPinHash);
+        if (cloudBioEnabled != null) {
+          await prefs.setBool(_biometricEnabledKey, cloudBioEnabled);
+        }
+        return true;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error syncing partner security profile from cloud: $e');
+    }
+    return false;
   }
 
   /// Verify entered PIN against stored hash. Returns true if correct.
@@ -132,10 +197,22 @@ class AuthService {
     return prefs.getBool(_biometricEnabledKey) ?? true;
   }
 
-  /// Save the user's preference for biometric sign-in.
-  static Future<void> setBiometricEnabled(bool enabled) async {
+  /// Save the user's preference for biometric sign-in (locally and in Firestore).
+  static Future<void> setBiometricEnabled(bool enabled, {String? uid}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_biometricEnabledKey, enabled);
+
+    final targetUid = uid ?? FirebaseAuth.instance.currentUser?.uid;
+    if (targetUid != null && targetUid.isNotEmpty) {
+      try {
+        await FirebaseFirestore.instance.collection('partners').doc(targetUid).set({
+          'isBiometricEnabled': enabled,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('⚠️ Error saving biometric preference to Firestore: $e');
+      }
+    }
   }
 
   // ─── Device-Specific Biometric Detection ───────────────────────
