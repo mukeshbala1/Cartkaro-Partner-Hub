@@ -5,13 +5,17 @@ import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routes/app_router.dart';
 
+import 'firebase_options.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Firebase init is wrapped in try/catch so the app runs on macOS
   // even without a GoogleService-Info.plist (UI preview mode).
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e) {
     // Firebase not configured for this platform (e.g. macOS dev run).
     // The app will still launch for UI development purposes.

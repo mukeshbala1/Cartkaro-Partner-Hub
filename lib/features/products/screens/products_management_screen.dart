@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/utils/safe_image_provider.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 class ProductsManagementScreen extends StatefulWidget {
@@ -477,7 +477,13 @@ class _ProductCardState extends State<_ProductCard> {
             child: hasImage
                 ? AnimatedSwitcher(
                     duration: const Duration(milliseconds: 600),
-                    child: _images[_currentImageIndex].startsWith('assets') ? Image.asset(_images[_currentImageIndex], key: ValueKey<String>(_images[_currentImageIndex]), fit: BoxFit.cover, width: 84, height: 84) : Image.file(File(_images[_currentImageIndex]), key: ValueKey<String>(_images[_currentImageIndex]), fit: BoxFit.cover, width: 84, height: 84),
+                    child: SafeImageWidget(
+                      imageKey: ValueKey<String>(_images[_currentImageIndex]),
+                      imagePath: _images[_currentImageIndex],
+                      fit: BoxFit.cover,
+                      width: 84,
+                      height: 84,
+                    ),
                   )
                 : Icon(LucideIcons.image, color: AppColors.kPrimary.withOpacity(0.4), size: 28),
           ),

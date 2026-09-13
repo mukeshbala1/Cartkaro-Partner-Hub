@@ -141,7 +141,7 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
           ),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 580),
+              constraints: const BoxConstraints(maxWidth: 1400),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -167,17 +167,35 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  ..._categories.map((cat) {
-                    final isSelected = _selectedCategory == cat.id;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: _CategoryCard(
-                        category: cat,
-                        isSelected: isSelected,
-                        onTap: () => _onCategorySelected(cat.id),
-                      ),
-                    );
-                  }),
+                  if (!isMobile)
+                    Row(
+                      children: _categories.map((cat) {
+                        final isSelected = _selectedCategory == cat.id;
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: _CategoryCard(
+                              category: cat,
+                              isSelected: isSelected,
+                              isVerticalLayout: true,
+                              onTap: () => _onCategorySelected(cat.id),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    )
+                  else
+                    ..._categories.map((cat) {
+                      final isSelected = _selectedCategory == cat.id;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: _CategoryCard(
+                          category: cat,
+                          isSelected: isSelected,
+                          onTap: () => _onCategorySelected(cat.id),
+                        ),
+                      );
+                    }),
                   const SizedBox(height: 20),
                   Center(
                     child: Container(
@@ -246,11 +264,13 @@ class _CategoryCard extends StatefulWidget {
   final _CategoryData category;
   final bool isSelected;
   final VoidCallback onTap;
+  final bool isVerticalLayout;
 
   const _CategoryCard({
     required this.category,
     required this.isSelected,
     required this.onTap,
+    this.isVerticalLayout = false,
   });
 
   @override
@@ -298,49 +318,50 @@ class _CategoryCardState extends State<_CategoryCard> {
             highlightColor: cat.accentColor.withValues(alpha: 0.04),
             child: Padding(
               padding: const EdgeInsets.all(18),
-              child: Row(
-                children: [
-                  // 3D AI Logo Container
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: cat.accentColor.withValues(alpha: 0.15),
-                        width: 1.2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: cat.accentColor.withValues(alpha: 0.10),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Image.asset(
-                      cat.imagePath,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Center(
-                          child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  // Title & Minimal Subtitle
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              child: widget.isVerticalLayout
+                  ? Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
+                        // 3D AI Logo Container
+                        Container(
+                          width: 84,
+                          height: 84,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color: cat.accentColor.withValues(alpha: 0.15),
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: cat.accentColor.withValues(alpha: 0.10),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.asset(
+                            cat.imagePath,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Center(
+                                child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        // Title & Badge
                         Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Flexible(
                               child: Text(
                                 cat.title,
+                                textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   fontSize: 17.5,
                                   fontWeight: FontWeight.w800,
@@ -349,58 +370,159 @@ class _CategoryCardState extends State<_CategoryCard> {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
-                              decoration: BoxDecoration(
-                                color: cat.accentColor.withValues(alpha: 0.09),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                cat.badgeText,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: cat.accentColor,
-                                  letterSpacing: 0.2,
-                                ),
-                              ),
-                            ),
                           ],
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
+                          decoration: BoxDecoration(
+                            color: cat.accentColor.withValues(alpha: 0.09),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            cat.badgeText,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: cat.accentColor,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         Text(
                           cat.subtitle,
+                          textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 12.8,
                             color: Color(0xFF64748B),
                             height: 1.4,
                             fontWeight: FontWeight.w400,
                           ),
-                          maxLines: 2,
+                          maxLines: 3,
                           overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 16),
+                        // Forward Arrow Action
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: active ? cat.accentColor : const Color(0xFFF1F5F9),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            LucideIcons.chevronRight,
+                            size: 18,
+                            color: active ? Colors.white : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        // 3D AI Logo Container
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: cat.accentColor.withValues(alpha: 0.15),
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: cat.accentColor.withValues(alpha: 0.10),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.asset(
+                            cat.imagePath,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Center(
+                                child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // Title & Minimal Subtitle
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      cat.title,
+                                      style: const TextStyle(
+                                        fontSize: 17.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF0F172A),
+                                        letterSpacing: -0.3,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
+                                    decoration: BoxDecoration(
+                                      color: cat.accentColor.withValues(alpha: 0.09),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      cat.badgeText,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: cat.accentColor,
+                                        letterSpacing: 0.2,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                cat.subtitle,
+                                style: const TextStyle(
+                                  fontSize: 12.8,
+                                  color: Color(0xFF64748B),
+                                  height: 1.4,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Forward Arrow Action
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: active ? cat.accentColor : const Color(0xFFF1F5F9),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            LucideIcons.chevronRight,
+                            size: 18,
+                            color: active ? Colors.white : const Color(0xFF64748B),
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Forward Arrow Action
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: active ? cat.accentColor : const Color(0xFFF1F5F9),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      LucideIcons.chevronRight,
-                      size: 18,
-                      color: active ? Colors.white : const Color(0xFF64748B),
-                    ),
-                  ),
-                ],
-              ),
             ),
           ),
         ),

@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/auth_service.dart';
+import '../widgets/web_auth_layout.dart';
 
 class ResetPinScreen extends StatefulWidget {
   const ResetPinScreen({super.key});
@@ -230,8 +231,11 @@ class _ResetPinScreenState extends State<ResetPinScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.kBackground,
+    return WebAuthLayout(
+      heroTitle: 'Reset Your PIN',
+      heroSubtitle: 'Forgot your PIN? Verify your phone number to securely reset it.',
+      mobileForm: Scaffold(
+        backgroundColor: AppColors.kBackground,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -435,7 +439,7 @@ class _ResetPinScreenState extends State<ResetPinScreen> {
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildPinField(String label, TextEditingController controller) {

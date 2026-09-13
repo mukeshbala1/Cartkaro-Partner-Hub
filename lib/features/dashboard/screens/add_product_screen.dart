@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/utils/safe_image_provider.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 class AddProductScreen extends StatefulWidget {
@@ -415,7 +416,24 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   ..._images.asMap().entries.map((entry) {
                     return Stack(
                       children: [
-                        Container(width: 100, margin: const EdgeInsets.only(right: 12), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), image: DecorationImage(image: entry.value.path.contains('assets') ? AssetImage(entry.value.path) as ImageProvider : FileImage(File(entry.value.path)), fit: BoxFit.cover))),
+                        Container(
+                          width: 100,
+                          height: 100,
+                          margin: const EdgeInsets.only(right: 12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: AppColors.kPrimary.withOpacity(0.07),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SafeImageWidget(
+                              imagePath: entry.value.path,
+                              width: 100,
+                              height: 100,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
                         Positioned(right: 16, top: 4, child: GestureDetector(onTap: () { setState(() { _images.removeAt(entry.key); }); }, child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle), child: const Icon(Icons.close, size: 14, color: Colors.white)))),
                       ],
                     );

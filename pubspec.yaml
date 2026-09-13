@@ -139,6 +139,7 @@ dependencies:
   shared_preferences: ^2.3.0   # Store PIN hash locally on device
   local_auth: ^2.3.0           # Face ID (iOS) / Fingerprint (Android)
   crypto: ^3.0.3               # SHA-256 PIN hashing
+  http: ^1.6.0
 
 
 

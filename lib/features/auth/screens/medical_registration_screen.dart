@@ -14,6 +14,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -21,6 +22,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/services/mapbox_service.dart';
+import '../../../core/utils/safe_image_provider.dart';
+import '../widgets/mapbox_location_picker.dart';
+import '../widgets/web_wizard_layout.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -103,6 +108,10 @@ class _MedicalRegistrationScreenState
   bool _is24HoursOpen       = false;
   bool _isEmergencyMedicine = false;
 
+  final List<String> _indianStates = [
+    'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+  ];
+
   // ── Step 5 ──
   final _drugLicenseCtrl       = TextEditingController();
   final _pharmacistRegCtrl     = TextEditingController();
@@ -134,6 +143,145 @@ class _MedicalRegistrationScreenState
 
   // ── Step 8 ──
   bool _agreementAccepted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDraft();
+  }
+
+  Future<void> _saveDraft() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final draftData = {
+        'currentStep': _currentStep,
+        'ownerName': _ownerNameCtrl.text,
+        'email': _emailCtrl.text,
+        'altMobile': _altMobileCtrl.text,
+        'profilePhotoPath': _profilePhotoPath,
+        'altCountryCode': _altCountryCode,
+        'medicalName': _medicalNameCtrl.text,
+        'medicalAddress': _medicalAddressCtrl.text,
+        'city': _cityCtrl.text,
+        'state': _stateCtrl.text,
+        'pincode': _pincodeCtrl.text,
+        'lat': _latCtrl.text,
+        'lng': _lngCtrl.text,
+        'medicalLogo': _medicalLogo,
+        'medicalBanner': _medicalBanner,
+        'medicalPhotos': _medicalPhotos,
+        'selectedCategories': _selectedCategories.toList(),
+        'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
+        'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
+        'workingDays': _workingDays.toList(),
+        'acceptOnlineOrders': _acceptOnlineOrders,
+        'is24HoursOpen': _is24HoursOpen,
+        'isEmergencyMedicine': _isEmergencyMedicine,
+        'drugLicense': _drugLicenseCtrl.text,
+        'pharmacistReg': _pharmacistRegCtrl.text,
+        'gstNumber': _gstNumberCtrl.text,
+        'tradeLicense': _tradeLicenseCtrl.text,
+        'pan': _panCtrl.text,
+        'aadhaar': _aadhaarCtrl.text,
+        'drugLicenseCertPath': _drugLicenseCertPath,
+        'pharmacistCertPath': _pharmacistCertPath,
+        'gstCertPath': _gstCertPath,
+        'panDocPath': _panDocPath,
+        'aadhaarDocPath': _aadhaarDocPath,
+        'accountHolder': _accountHolderCtrl.text,
+        'accountNumber': _accountNumberCtrl.text,
+        'ifsc': _ifscCtrl.text,
+        'upi': _upiCtrl.text,
+        'selectedBank': _selectedBank,
+        'cancelledChequePath': _cancelledChequePath,
+        'deliveryOption': _deliveryOption,
+        'isPrescriptionRequired': _isPrescriptionRequired,
+        'isSameDayDelivery': _isSameDayDelivery,
+        'isEmergencyDelivery': _isEmergencyDelivery,
+        'agreementAccepted': _agreementAccepted,
+      };
+      await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_medical').set(draftData);
+    } catch (e) {
+      debugPrint('Draft save failed: $e');
+    }
+  }
+
+  Future<void> _loadDraft() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_medical').get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        setState(() {
+          _currentStep = 0;
+          _ownerNameCtrl.text = data['ownerName'] ?? '';
+          _emailCtrl.text = data['email'] ?? '';
+          _altMobileCtrl.text = data['altMobile'] ?? '';
+          _profilePhotoPath = data['profilePhotoPath'] ?? '';
+          _altCountryCode = data['altCountryCode'] ?? '+91';
+          _medicalNameCtrl.text = data['medicalName'] ?? '';
+          _medicalAddressCtrl.text = data['medicalAddress'] ?? '';
+          _cityCtrl.text = data['city'] ?? '';
+          _stateCtrl.text = data['state'] ?? '';
+          _pincodeCtrl.text = data['pincode'] ?? '';
+          _latCtrl.text = data['lat'] ?? '';
+          _lngCtrl.text = data['lng'] ?? '';
+          _medicalLogo = data['medicalLogo'] ?? '';
+          _medicalBanner = data['medicalBanner'] ?? '';
+          _medicalPhotos = List<String>.from(data['medicalPhotos'] ?? []);
+          _selectedCategories.addAll(List<String>.from(data['selectedCategories'] ?? []));
+          
+          if (data['openingTime'] != null) {
+            final parts = data['openingTime'].split(':');
+            _openingTime = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          if (data['closingTime'] != null) {
+            final parts = data['closingTime'].split(':');
+            _closingTime = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          
+          if (data['workingDays'] != null) {
+            _workingDays.clear();
+            _workingDays.addAll(List<String>.from(data['workingDays']));
+          }
+          
+          _acceptOnlineOrders = data['acceptOnlineOrders'] ?? true;
+          _is24HoursOpen = data['is24HoursOpen'] ?? false;
+          _isEmergencyMedicine = data['isEmergencyMedicine'] ?? false;
+          
+          _drugLicenseCtrl.text = data['drugLicense'] ?? '';
+          _pharmacistRegCtrl.text = data['pharmacistReg'] ?? '';
+          _gstNumberCtrl.text = data['gstNumber'] ?? '';
+          _tradeLicenseCtrl.text = data['tradeLicense'] ?? '';
+          _panCtrl.text = data['pan'] ?? '';
+          _aadhaarCtrl.text = data['aadhaar'] ?? '';
+          _drugLicenseCertPath = data['drugLicenseCertPath'] ?? '';
+          _pharmacistCertPath = data['pharmacistCertPath'] ?? '';
+          _gstCertPath = data['gstCertPath'] ?? '';
+          _panDocPath = data['panDocPath'] ?? '';
+          _aadhaarDocPath = data['aadhaarDocPath'] ?? '';
+          
+          _accountHolderCtrl.text = data['accountHolder'] ?? '';
+          _accountNumberCtrl.text = data['accountNumber'] ?? '';
+          _confirmAccountCtrl.text = data['accountNumber'] ?? '';
+          _ifscCtrl.text = data['ifsc'] ?? '';
+          _upiCtrl.text = data['upi'] ?? '';
+          _selectedBank = data['selectedBank'] ?? '';
+          _cancelledChequePath = data['cancelledChequePath'] ?? '';
+          
+          _deliveryOption = data['deliveryOption'] ?? 'cartkaro';
+          _isPrescriptionRequired = data['isPrescriptionRequired'] ?? false;
+          _isSameDayDelivery = data['isSameDayDelivery'] ?? true;
+          _isEmergencyDelivery = data['isEmergencyDelivery'] ?? false;
+          _agreementAccepted = data['agreementAccepted'] ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Draft load failed: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -367,10 +515,35 @@ class _MedicalRegistrationScreenState
       if (!mounted) return;
 
       setState(() {
-        if ((geo['address'] ?? '').isNotEmpty) _medicalAddressCtrl.text = geo['address']!;
-        if ((geo['city'] ?? '').isNotEmpty) _cityCtrl.text = geo['city']!;
-        if ((geo['state'] ?? '').isNotEmpty) _stateCtrl.text = geo['state']!;
-        if ((geo['pincode'] ?? '').isNotEmpty) _pincodeCtrl.text = geo['pincode']!;
+        String addr = geo['address'] ?? '';
+        String area = geo['area'] ?? '';
+        String city = geo['city'] ?? '';
+        String stateRaw = geo['state'] ?? '';
+        String pin = geo['pincode'] ?? '';
+
+        String matchedState = '';
+        if (stateRaw.isNotEmpty) {
+          matchedState = _indianStates.firstWhere(
+            (s) => s.toLowerCase() == stateRaw.toLowerCase(),
+            orElse: () => _indianStates.firstWhere(
+              (s) => s.toLowerCase().contains(stateRaw.toLowerCase()) || stateRaw.toLowerCase().contains(s.toLowerCase()),
+              orElse: () => '',
+            ),
+          );
+        }
+
+        List<String> parts = [];
+        if (addr.isNotEmpty) parts.add(addr);
+        if (area.isNotEmpty && !addr.toLowerCase().contains(area.toLowerCase())) parts.add(area);
+        if (city.isNotEmpty && !addr.toLowerCase().contains(city.toLowerCase())) parts.add(city);
+        if (matchedState.isNotEmpty && !addr.toLowerCase().contains(matchedState.toLowerCase())) parts.add(matchedState);
+        if (pin.isNotEmpty && !addr.toLowerCase().contains(pin.toLowerCase())) parts.add(pin);
+
+        _medicalAddressCtrl.text = parts.join(', ');
+        
+        if (city.isNotEmpty) _cityCtrl.text = city;
+        if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
+        if (pin.isNotEmpty) _pincodeCtrl.text = pin;
       });
 
       if (mounted) {
@@ -529,6 +702,7 @@ class _MedicalRegistrationScreenState
           if (user != null) {
             final docRef = FirebaseFirestore.instance.collection('businesses').doc();
             await docRef.set({
+              'userId': user.uid,
               'ownerUid': user.uid,
               'businessType': 'medical',
               'status': 'pending',
@@ -538,6 +712,8 @@ class _MedicalRegistrationScreenState
               'ownerName': _ownerNameCtrl.text,
               'email': _emailCtrl.text,
               'altMobile': _altMobileCtrl.text,
+              'altCountryCode': _altCountryCode,
+              'profilePhotoPath': _profilePhotoPath,
               'medicalName': _medicalNameCtrl.text,
               'medicalAddress': _medicalAddressCtrl.text,
               'city': _cityCtrl.text,
@@ -545,6 +721,9 @@ class _MedicalRegistrationScreenState
               'pincode': _pincodeCtrl.text,
               'lat': _latCtrl.text,
               'lng': _lngCtrl.text,
+              'medicalLogo': _medicalLogo,
+              'medicalBanner': _medicalBanner,
+              'medicalPhotos': _medicalPhotos,
               'categories': _selectedCategories.toList(),
               'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
               'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
@@ -558,17 +737,31 @@ class _MedicalRegistrationScreenState
               'tradeLicense': _tradeLicenseCtrl.text,
               'pan': _panCtrl.text,
               'aadhaar': _aadhaarCtrl.text,
+              'drugLicenseCertPath': _drugLicenseCertPath,
+              'pharmacistCertPath': _pharmacistCertPath,
+              'gstCertPath': _gstCertPath,
+              'panDocPath': _panDocPath,
+              'aadhaarDocPath': _aadhaarDocPath,
               'accountHolder': _accountHolderCtrl.text,
               'accountNumber': _accountNumberCtrl.text,
               'ifsc': _ifscCtrl.text,
               'upi': _upiCtrl.text,
               'bank': _selectedBank,
+              'cancelledChequePath': _cancelledChequePath,
               'deliveryOption': _deliveryOption,
               'isPrescriptionRequired': _isPrescriptionRequired,
               'isSameDayDelivery': _isSameDayDelivery,
               'isEmergencyDelivery': _isEmergencyDelivery,
             });
             _savedBusinessId = docRef.id;
+            
+            // Delete draft on successful registration
+            await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_medical').delete();
+            
+            if (mounted) {
+              context.go('/dashboard', extra: _savedBusinessId);
+            }
+            return;
           }
         } catch (e) {
           debugPrint('Failed to save to Firestore: $e');
@@ -582,18 +775,15 @@ class _MedicalRegistrationScreenState
       setState(() {
         _currentStep = nextPage;
       });
+      _saveDraft();
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (nextPage == 8) {
-          _pageController.jumpToPage(nextPage);
-        } else {
-          _pageController.animateToPage(
-            nextPage,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeInOut,
-          );
-        }
+        _pageController.animateToPage(
+          nextPage,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+        );
       });
     }
   }
@@ -630,37 +820,32 @@ class _MedicalRegistrationScreenState
                       ? constraints.maxWidth * 0.85
                       : constraints.maxWidth;
 
-              return Column(
-                children: [
-                  _buildTopBar(context, isTablet),
-                  if (_currentStep < 8)
-                    _buildProgressBar(
-                        constraints.maxWidth, contentWidth, isTablet),
-                  Expanded(
-                    child: Center(
-                      child: SizedBox(
-                        width: contentWidth,
-                        child: PageView(
-                          controller: _pageController,
-                          physics: const NeverScrollableScrollPhysics(),
-                          children: [
-                            _buildStep1(),
-                            _buildStep2(),
-                            _buildStep3(),
-                            _buildStep4(),
-                            _buildStep5(),
-                            _buildStep6(),
-                            _buildStep7(),
-                            _buildStep8(),
-                            _MedicalSuccessScreen(businessId: _savedBusinessId),
-                          ],
-                        ),
+              return WebWizardLayout(
+                topBar: _buildTopBar(context, isTablet),
+                progressBar: _currentStep < 8 ? _buildProgressBar(constraints.maxWidth, contentWidth, isTablet) : null,
+                formContent: Column(
+                  children: [
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _buildStep1(),
+                          _buildStep2(),
+                          _buildStep3(),
+                          _buildStep4(),
+                          _buildStep5(),
+                          _buildStep6(),
+                          _buildStep7(),
+                          _buildStep8(),
+                          _MedicalSuccessScreen(businessId: _savedBusinessId),
+                        ],
                       ),
                     ),
-                  ),
-                  if (_currentStep < 8)
-                    _buildBottomNav(contentWidth),
-                ],
+                    if (_currentStep < 8)
+                      _buildBottomNav(contentWidth),
+                  ],
+                ),
               );
             },
           ),
@@ -2623,9 +2808,9 @@ class _ProfilePhotoUpload extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(
                   color: uploaded ? kNavyBlue : kBorderColor, width: 2),
-              image: uploaded
+              image: (uploaded && getSafeImageProvider(path) != null)
                   ? DecorationImage(
-                      image: FileImage(File(path)), fit: BoxFit.cover)
+                      image: getSafeImageProvider(path)!, fit: BoxFit.cover)
                   : null,
             ),
             child: !uploaded
@@ -2964,9 +3149,9 @@ class _UploadBox extends StatelessWidget {
               style: BorderStyle.solid,
               width: uploaded ? 1.5 : 1,
             ),
-            image: uploaded
+            image: (uploaded && getSafeImageProvider(imagePath) != null)
                 ? DecorationImage(
-                    image: FileImage(File(imagePath)),
+                    image: getSafeImageProvider(imagePath)!,
                     fit: BoxFit.cover)
                 : null,
           ),
@@ -3062,9 +3247,11 @@ class _MultiPhotoUpload extends StatelessWidget {
                 color: kBlueAccent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: kNavyBlue.withOpacity(0.4)),
-                image: DecorationImage(
-                    image: FileImage(File(photos[i])),
-                    fit: BoxFit.cover),
+                image: getSafeImageProvider(photos[i]) != null
+                    ? DecorationImage(
+                        image: getSafeImageProvider(photos[i])!,
+                        fit: BoxFit.cover)
+                    : null,
               ),
               child: Stack(
                 children: [

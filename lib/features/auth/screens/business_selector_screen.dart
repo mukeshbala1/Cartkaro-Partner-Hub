@@ -55,9 +55,12 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
         title: const Text('Select Business', style: TextStyle(color: AppColors.kDarkText, fontWeight: FontWeight.bold)),
         centerTitle: true,
       ),
-      body: SafeArea(
-        child: user == null
-            ? const Center(child: Text("Not logged in"))
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: SafeArea(
+            child: user == null
+                ? const Center(child: Text("Not logged in"))
             : StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('businesses')
@@ -96,24 +99,58 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
                         ),
                         const SizedBox(height: 32),
                         Expanded(
-                          child: ListView.separated(
-                            itemCount: docs.length + 1, // +1 for "Add new"
-                            separatorBuilder: (context, index) => const SizedBox(height: 16),
-                            itemBuilder: (context, index) {
-                              if (index == docs.length) {
-                                return _buildAddNewButton();
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              // If width is wide (desktop/tablet), use GridView
+                              if (constraints.maxWidth > 600) {
+                                return GridView.builder(
+                                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent: 400,
+                                    crossAxisSpacing: 16,
+                                    mainAxisSpacing: 16,
+                                    childAspectRatio: 2.5,
+                                  ),
+                                  itemCount: docs.length + 1,
+                                  itemBuilder: (context, index) {
+                                    if (index == docs.length) {
+                                      return _buildAddNewButton();
+                                    }
+                                    
+                                    final doc = docs[index];
+                                    final data = doc.data() as Map<String, dynamic>;
+                                    final type = data['businessType'] ?? 'grocery';
+                                    final name = data['storeName'] ?? data['restaurantName'] ?? data['medicalName'] ?? 'Unnamed Business';
+                                    
+                                    return _buildBusinessCard(
+                                      name: name,
+                                      type: type,
+                                      onTap: () => context.go('/dashboard', extra: doc.id),
+                                    );
+                                  },
+                                );
+                              } else {
+                                // Mobile view uses ListView
+                                return ListView.separated(
+                                  itemCount: docs.length + 1,
+                                  separatorBuilder: (context, index) => const SizedBox(height: 16),
+                                  itemBuilder: (context, index) {
+                                    if (index == docs.length) {
+                                      return _buildAddNewButton();
+                                    }
+                                    
+                                    final doc = docs[index];
+                                    final data = doc.data() as Map<String, dynamic>;
+                                    final type = data['businessType'] ?? 'grocery';
+                                    final name = data['storeName'] ?? data['restaurantName'] ?? data['medicalName'] ?? 'Unnamed Business';
+                                    
+                                    return _buildBusinessCard(
+                                      name: name,
+                                      type: type,
+                                      onTap: () => context.go('/dashboard', extra: doc.id),
+                                    );
+                                  },
+                                );
                               }
-                              
-                              final doc = docs[index];
-                              final data = doc.data() as Map<String, dynamic>;
-                              final type = data['businessType'] ?? 'grocery';
-                              final name = data['storeName'] ?? data['restaurantName'] ?? data['medicalName'] ?? 'Unnamed Business';
-                              
-                              return _buildBusinessCard(
-                                name: name,
-                                type: type,
-                                onTap: () => context.go('/dashboard', extra: doc.id),
-                              );
                             },
                           ),
                         ),
@@ -122,6 +159,8 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
                   );
                 },
               ),
+          ),
+        ),
       ),
     );
   }

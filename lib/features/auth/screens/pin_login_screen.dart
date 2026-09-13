@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/auth_service.dart';
+import '../widgets/web_auth_layout.dart';
 
 class PinLoginScreen extends StatefulWidget {
   const PinLoginScreen({super.key});
@@ -308,8 +309,11 @@ class _PinLoginScreenState extends State<PinLoginScreen>
     final bioIcon = _bioInfo?.icon ?? LucideIcons.fingerprint;
     final isBioAvailable = _bioInfo?.isSupported ?? false;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
+    return WebAuthLayout(
+      heroTitle: 'Welcome Back',
+      heroSubtitle: 'Enter your secure PIN to access your dashboard quickly.',
+      mobileForm: Scaffold(
+        backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -364,9 +368,13 @@ class _PinLoginScreenState extends State<PinLoginScreen>
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 28),
+        child: CustomScrollView(
+          slivers: [
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Column(
+                children: [
+                  const SizedBox(height: 28),
 
             // ── Greeting & Comment (Deep Dark High-Contrast) ───
             Text(
@@ -400,9 +408,11 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                 offset: Offset(_shakeAnim.value * (_shakeCtrl.value < 0.5 ? 1 : -1), 0),
                 child: child,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(4, (i) {
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(4, (i) {
                   final isFilled = i < _pin.length;
                   final isFocused = i == _pin.length;
 
@@ -471,6 +481,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                     ),
                   );
                 }),
+                ),
               ),
             ),
 
@@ -548,8 +559,10 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                         child: CircularProgressIndicator(color: Color(0xFF0F172A)),
                       ),
                     )
-                  : Column(
-                      children: [
+                  : FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Column(
+                        children: [
                         for (final row in [
                           [
                             {'d': '1', 'sub': ''},
@@ -586,6 +599,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                           ),
                       ],
                     ),
+                  ),
             ),
 
             // ── Minimal Footer (High Contrast) ────────────────
@@ -612,7 +626,10 @@ class _PinLoginScreenState extends State<PinLoginScreen>
           ],
         ),
       ),
-    );
+      ],
+      ),
+      ),
+    ));
   }
 
   Widget _buildNumpadKey({

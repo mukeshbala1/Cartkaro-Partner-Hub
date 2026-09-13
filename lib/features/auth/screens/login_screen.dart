@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/services/auth_service.dart';
+import '../widgets/web_auth_layout.dart';
 
 // ── Brand tokens ────────────────────────────────────────────────
 const Color kBrand = Color(0xFF223554);
@@ -463,35 +464,46 @@ class _LoginScreenState extends State<LoginScreen>
     // KEY FIX: Use Scaffold with resizeToAvoidBottomInset: true (default)
     // and let the Column use Expanded for hero + intrinsic for form card.
     // No fixed height SizedBox — that's what caused the overflow.
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      backgroundColor: kBrandDark,
-      body: Stack(
-        children: [
-          // Floating bg rects — purely decorative, don't affect layout
-          ..._buildFloatingRects(size),
+    return WebAuthLayout(
+      heroTitle: 'Partner Hub Login',
+      heroSubtitle: 'Access your dashboard, manage orders, and grow your business with CartKaro.',
+      mobileForm: Scaffold(
+        resizeToAvoidBottomInset: true,
+        backgroundColor: kBrandDark,
+        body: Stack(
+          children: [
+            // Floating bg rects — purely decorative, don't affect layout
+            ..._buildFloatingRects(size),
 
-          // Main layout: full screen column inside SafeArea
-          SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Hero section — takes all available space above the card
-                Expanded(child: _buildHeroSection()),
+            // Main layout: full screen column inside SafeArea
+            SafeArea(
+              child: CustomScrollView(
+                slivers: [
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                  // Hero section — takes all available space above the card
+                  Expanded(child: _buildHeroSection()),
 
-                // Form card — slides up, hugs content, keyboard pushes it up
-                // naturally because Scaffold resizes its body
-                SlideTransition(
-                  position: _formSlide,
-                  child: FadeTransition(
-                    opacity: _formFade,
-                    child: _buildFormCard(size),
+                  // Form card — slides up, hugs content, keyboard pushes it up
+                  // naturally because Scaffold resizes its body
+                  SlideTransition(
+                    position: _formSlide,
+                    child: FadeTransition(
+                      opacity: _formFade,
+                      child: _buildFormCard(size),
+                    ),
                   ),
-                ),
-              ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

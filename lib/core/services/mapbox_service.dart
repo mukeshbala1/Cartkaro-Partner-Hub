@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 class MapboxService {
   // Public Mapbox Access Token (Configurable via --dart-define=MAPBOX_ACCESS_TOKEN=pk.eyJ...)
@@ -26,18 +26,15 @@ class MapboxService {
     // 1. Mapbox API Reverse Geocoding
     if (mapboxAccessToken.startsWith('pk.')) {
       try {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 5);
         final url = Uri.parse(
           'https://api.mapbox.com/geocoding/v5/mapbox.places/$lng,$lat.json?access_token=$mapboxAccessToken&types=address,poi,neighborhood,locality,place,district,region,postcode',
         );
-        final request = await client.getUrl(url);
-        request.headers.set('User-Agent', 'CartKaroPartnerHub/1.0');
-        final response = await request.close();
+        final response = await http.get(url, headers: {
+          'User-Agent': 'CartKaroPartnerHub/1.0',
+        }).timeout(const Duration(seconds: 5));
 
         if (response.statusCode == 200) {
-          final responseBody = await response.transform(utf8.decoder).join();
-          final data = jsonDecode(responseBody) as Map<String, dynamic>;
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
           final features = data['features'] as List<dynamic>? ?? [];
 
           if (features.isNotEmpty) {
@@ -88,17 +85,15 @@ class MapboxService {
     // 2. OpenStreetMap Fallback if Mapbox returned empty or failed
     if (geo.isEmpty || (geo['address']?.trim().length ?? 0) < 5) {
       try {
-        final client = HttpClient();
-        client.connectionTimeout = const Duration(seconds: 5);
-        final request = await client.getUrl(Uri.parse(
+        final url = Uri.parse(
           'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&zoom=18&addressdetails=1',
-        ));
-        request.headers.set('User-Agent', 'CartKaroPartnerHub/1.0');
-        final response = await request.close();
+        );
+        final response = await http.get(url, headers: {
+          'User-Agent': 'CartKaroPartnerHub/1.0',
+        }).timeout(const Duration(seconds: 5));
 
         if (response.statusCode == 200) {
-          final responseBody = await response.transform(utf8.decoder).join();
-          final data = jsonDecode(responseBody) as Map<String, dynamic>;
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
           final address = data['address'] as Map<String, dynamic>? ?? {};
           final String displayName = data['display_name'] as String? ?? '';
 

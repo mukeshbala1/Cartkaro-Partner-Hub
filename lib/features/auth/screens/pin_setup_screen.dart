@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/auth_service.dart';
+import '../widgets/web_auth_layout.dart';
 
 class PinSetupScreen extends StatefulWidget {
   const PinSetupScreen({super.key});
@@ -273,8 +274,11 @@ class _PinSetupScreenState extends State<PinSetupScreen>
   Widget build(BuildContext context) {
     final currentPin = _isConfirmStep ? _confirmedPin : _pin;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
+    return WebAuthLayout(
+      heroTitle: 'Set Up Your PIN',
+      heroSubtitle: 'Create a secure 4-digit PIN to keep your store dashboard safe.',
+      mobileForm: Scaffold(
+        backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -314,9 +318,13 @@ class _PinSetupScreenState extends State<PinSetupScreen>
         centerTitle: true,
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // ── Step Progress Line ────────────────────────────
+        child: CustomScrollView(
+          slivers: [
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Column(
+                children: [
+                  // ── Step Progress Line ────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28),
               child: Row(
@@ -411,9 +419,11 @@ class _PinSetupScreenState extends State<PinSetupScreen>
                 offset: Offset(_shakeAnim.value * (_shakeCtrl.value < 0.5 ? 1 : -1), 0),
                 child: child,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(4, (i) {
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(4, (i) {
                   final isFilled = i < currentPin.length;
                   final isFocused = i == currentPin.length;
 
@@ -482,6 +492,7 @@ class _PinSetupScreenState extends State<PinSetupScreen>
                     ),
                   );
                 }),
+                ),
               ),
             ),
 
@@ -556,8 +567,10 @@ class _PinSetupScreenState extends State<PinSetupScreen>
                         child: CircularProgressIndicator(color: AppColors.kPrimary),
                       ),
                     )
-                  : Column(
-                      children: [
+                  : FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Column(
+                        children: [
                         for (final row in [
                           [
                             {'d': '1', 'sub': ''},
@@ -589,11 +602,15 @@ class _PinSetupScreenState extends State<PinSetupScreen>
                           ),
                       ],
                     ),
+                  ),
             ),
           ],
         ),
       ),
-    );
+      ],
+      ),
+      ),
+    ));
   }
 
   Widget _buildNumpadKey(String digit, String sub) {

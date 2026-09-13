@@ -14,6 +14,10 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../core/constants/app_colors.dart';
+import '../widgets/mapbox_location_picker.dart';
+import '../widgets/web_wizard_layout.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -21,6 +25,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/utils/safe_image_provider.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -101,6 +106,10 @@ class _GroceryRegistrationScreenState
   };
   bool _acceptOnlineOrders = true;
 
+  final List<String> _indianStates = [
+    'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
+  ];
+
   // ── Step 5 ──
   final _fssaiNumberCtrl     = TextEditingController();
   final _gstNumberCtrl       = TextEditingController();
@@ -129,6 +138,137 @@ class _GroceryRegistrationScreenState
 
   // ── Step 8 ──
   bool _agreementAccepted    = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDraft();
+  }
+
+  Future<void> _saveDraft() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final draftData = {
+        'currentStep': _currentStep,
+        'ownerName': _ownerNameCtrl.text,
+        'email': _emailCtrl.text,
+        'altMobile': _altMobileCtrl.text,
+        'profilePhotoPath': _profilePhotoPath,
+        'altCountryCode': _altCountryCode,
+        'storeName': _storeNameCtrl.text,
+        'storeAddress': _storeAddressCtrl.text,
+        'city': _cityCtrl.text,
+        'state': _stateCtrl.text,
+        'pincode': _pincodeCtrl.text,
+        'lat': _latCtrl.text,
+        'lng': _lngCtrl.text,
+        'storeLogoPath': _storeLogoPath,
+        'storeBannerPath': _storeBannerPath,
+        'storePhotos': _storePhotos,
+        'selectedCategories': _selectedCategories.toList(),
+        'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
+        'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
+        'workingDays': _workingDays.toList(),
+        'acceptOnlineOrders': _acceptOnlineOrders,
+        'fssaiNumber': _fssaiNumberCtrl.text,
+        'gstNumber': _gstNumberCtrl.text,
+        'tradeLicense': _tradeLicenseCtrl.text,
+        'pan': _panCtrl.text,
+        'aadhaar': _aadhaarCtrl.text,
+        'fssaiCertPath': _fssaiCertPath,
+        'gstCertPath': _gstCertPath,
+        'tradeLicensePath': _tradeLicensePath,
+        'panDocPath': _panDocPath,
+        'aadhaarDocPath': _aadhaarDocPath,
+        'accountHolder': _accountHolderCtrl.text,
+        'accountNumber': _accountNumberCtrl.text,
+        'ifsc': _ifscCtrl.text,
+        'upi': _upiCtrl.text,
+        'selectedBank': _selectedBank,
+        'cancelledChequePath': _cancelledChequePath,
+        'deliveryOption': _deliveryOption,
+        'minOrder': _minOrderCtrl.text,
+        'estDelivery': _estDeliveryCtrl.text,
+        'agreementAccepted': _agreementAccepted,
+      };
+      await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_grocery').set(draftData);
+    } catch (e) {
+      debugPrint('Draft save failed: $e');
+    }
+  }
+
+  Future<void> _loadDraft() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_grocery').get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        setState(() {
+          _currentStep = 0;
+          _ownerNameCtrl.text = data['ownerName'] ?? '';
+          _emailCtrl.text = data['email'] ?? '';
+          _altMobileCtrl.text = data['altMobile'] ?? '';
+          _profilePhotoPath = data['profilePhotoPath'] ?? '';
+          _altCountryCode = data['altCountryCode'] ?? '+91';
+          _storeNameCtrl.text = data['storeName'] ?? '';
+          _storeAddressCtrl.text = data['storeAddress'] ?? '';
+          _cityCtrl.text = data['city'] ?? '';
+          _stateCtrl.text = data['state'] ?? '';
+          _pincodeCtrl.text = data['pincode'] ?? '';
+          _latCtrl.text = data['lat'] ?? '';
+          _lngCtrl.text = data['lng'] ?? '';
+          _storeLogoPath = data['storeLogoPath'] ?? '';
+          _storeBannerPath = data['storeBannerPath'] ?? '';
+          _storePhotos = List<String>.from(data['storePhotos'] ?? []);
+          _selectedCategories.addAll(List<String>.from(data['selectedCategories'] ?? []));
+          
+          if (data['openingTime'] != null) {
+            final parts = data['openingTime'].split(':');
+            _openingTime = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          if (data['closingTime'] != null) {
+            final parts = data['closingTime'].split(':');
+            _closingTime = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          
+          if (data['workingDays'] != null) {
+            _workingDays.clear();
+            _workingDays.addAll(List<String>.from(data['workingDays']));
+          }
+          
+          _acceptOnlineOrders = data['acceptOnlineOrders'] ?? true;
+          
+          _fssaiNumberCtrl.text = data['fssaiNumber'] ?? '';
+          _gstNumberCtrl.text = data['gstNumber'] ?? '';
+          _tradeLicenseCtrl.text = data['tradeLicense'] ?? '';
+          _panCtrl.text = data['pan'] ?? '';
+          _aadhaarCtrl.text = data['aadhaar'] ?? '';
+          _fssaiCertPath = data['fssaiCertPath'] ?? '';
+          _gstCertPath = data['gstCertPath'] ?? '';
+          _tradeLicensePath = data['tradeLicensePath'] ?? '';
+          _panDocPath = data['panDocPath'] ?? '';
+          _aadhaarDocPath = data['aadhaarDocPath'] ?? '';
+          
+          _accountHolderCtrl.text = data['accountHolder'] ?? '';
+          _accountNumberCtrl.text = data['accountNumber'] ?? '';
+          _confirmAccountCtrl.text = data['accountNumber'] ?? '';
+          _ifscCtrl.text = data['ifsc'] ?? '';
+          _upiCtrl.text = data['upi'] ?? '';
+          _selectedBank = data['selectedBank'] ?? '';
+          _cancelledChequePath = data['cancelledChequePath'] ?? '';
+          
+          _deliveryOption = data['deliveryOption'] ?? 'cartkaro';
+          _minOrderCtrl.text = data['minOrder'] ?? '';
+          _estDeliveryCtrl.text = data['estDelivery'] ?? '';
+          _agreementAccepted = data['agreementAccepted'] ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Draft load failed: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -361,10 +501,35 @@ class _GroceryRegistrationScreenState
       if (!mounted) return;
 
       setState(() {
-        if ((geo['address'] ?? '').isNotEmpty) _storeAddressCtrl.text = geo['address']!;
-        if ((geo['city'] ?? '').isNotEmpty) _cityCtrl.text = geo['city']!;
-        if ((geo['state'] ?? '').isNotEmpty) _stateCtrl.text = geo['state']!;
-        if ((geo['pincode'] ?? '').isNotEmpty) _pincodeCtrl.text = geo['pincode']!;
+        String addr = geo['address'] ?? '';
+        String area = geo['area'] ?? '';
+        String city = geo['city'] ?? '';
+        String stateRaw = geo['state'] ?? '';
+        String pin = geo['pincode'] ?? '';
+
+        String matchedState = '';
+        if (stateRaw.isNotEmpty) {
+          matchedState = _indianStates.firstWhere(
+            (s) => s.toLowerCase() == stateRaw.toLowerCase(),
+            orElse: () => _indianStates.firstWhere(
+              (s) => s.toLowerCase().contains(stateRaw.toLowerCase()) || stateRaw.toLowerCase().contains(s.toLowerCase()),
+              orElse: () => '',
+            ),
+          );
+        }
+
+        List<String> parts = [];
+        if (addr.isNotEmpty) parts.add(addr);
+        if (area.isNotEmpty && !addr.toLowerCase().contains(area.toLowerCase())) parts.add(area);
+        if (city.isNotEmpty && !addr.toLowerCase().contains(city.toLowerCase())) parts.add(city);
+        if (matchedState.isNotEmpty && !addr.toLowerCase().contains(matchedState.toLowerCase())) parts.add(matchedState);
+        if (pin.isNotEmpty && !addr.toLowerCase().contains(pin.toLowerCase())) parts.add(pin);
+
+        _storeAddressCtrl.text = parts.join(', ');
+        
+        if (city.isNotEmpty) _cityCtrl.text = city;
+        if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
+        if (pin.isNotEmpty) _pincodeCtrl.text = pin;
       });
 
       if (mounted) {
@@ -523,6 +688,7 @@ class _GroceryRegistrationScreenState
           if (user != null) {
             final docRef = FirebaseFirestore.instance.collection('businesses').doc();
             await docRef.set({
+              'userId': user.uid,
               'ownerUid': user.uid,
               'businessType': 'grocery',
               'status': 'pending',
@@ -532,6 +698,8 @@ class _GroceryRegistrationScreenState
               'ownerName': _ownerNameCtrl.text,
               'email': _emailCtrl.text,
               'altMobile': _altMobileCtrl.text,
+              'altCountryCode': _altCountryCode,
+              'profilePhotoPath': _profilePhotoPath,
               'storeName': _storeNameCtrl.text,
               'storeAddress': _storeAddressCtrl.text,
               'city': _cityCtrl.text,
@@ -539,6 +707,9 @@ class _GroceryRegistrationScreenState
               'pincode': _pincodeCtrl.text,
               'lat': _latCtrl.text,
               'lng': _lngCtrl.text,
+              'storeLogoPath': _storeLogoPath,
+              'storeBannerPath': _storeBannerPath,
+              'storePhotos': _storePhotos,
               'categories': _selectedCategories.toList(),
               'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
               'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
@@ -549,16 +720,30 @@ class _GroceryRegistrationScreenState
               'tradeLicense': _tradeLicenseCtrl.text,
               'pan': _panCtrl.text,
               'aadhaar': _aadhaarCtrl.text,
+              'fssaiCertPath': _fssaiCertPath,
+              'gstCertPath': _gstCertPath,
+              'tradeLicensePath': _tradeLicensePath,
+              'panDocPath': _panDocPath,
+              'aadhaarDocPath': _aadhaarDocPath,
               'accountHolder': _accountHolderCtrl.text,
               'accountNumber': _accountNumberCtrl.text,
               'ifsc': _ifscCtrl.text,
               'upi': _upiCtrl.text,
               'bank': _selectedBank,
+              'cancelledChequePath': _cancelledChequePath,
               'deliveryOption': _deliveryOption,
               'minOrder': _minOrderCtrl.text,
               'estDelivery': _estDeliveryCtrl.text,
             });
             _savedBusinessId = docRef.id;
+            
+            // Delete draft on successful registration
+            await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_grocery').delete();
+            
+            if (mounted) {
+              context.go('/dashboard', extra: _savedBusinessId);
+            }
+            return;
           }
         } catch (e) {
           debugPrint('Failed to save to Firestore: $e');
@@ -572,19 +757,16 @@ class _GroceryRegistrationScreenState
       setState(() {
         _currentStep = nextPage;
       });
+      _saveDraft();
 
       // ✅ FIX: addPostFrameCallback se call karo — setState ke baad frame mein
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (nextPage == 8) {
-          _pageController.jumpToPage(nextPage);
-        } else {
-          _pageController.animateToPage(
-            nextPage,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeInOut,
-          );
-        }
+        _pageController.animateToPage(
+          nextPage,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+        );
       });
     }
   }
@@ -621,38 +803,32 @@ class _GroceryRegistrationScreenState
                       ? constraints.maxWidth * 0.85
                       : constraints.maxWidth;
 
-              return Column(
-                children: [
-                  _buildTopBar(context, isTablet),
-                  if (_currentStep < 8)
-                    _buildProgressBar(
-                        constraints.maxWidth, contentWidth, isTablet),
-                  Expanded(
-                    child: Center(
-                      child: SizedBox(
-                        width: contentWidth,
-                        child: PageView(
-                          controller: _pageController,
-                          physics: const NeverScrollableScrollPhysics(),
-                          children: [
-                            _buildStep1(),
-                            _buildStep2(),
-                            _buildStep3(),
-                            _buildStep4(),
-                            _buildStep5(),
-                            _buildStep6(),
-                            _buildStep7(),
-                            _buildStep8(),
-                            // FIX 2: StatefulWidget — loading + success
-                            _SuccessScreen(businessId: _savedBusinessId),
-                          ],
-                        ),
+              return WebWizardLayout(
+                topBar: _buildTopBar(context, isTablet),
+                progressBar: _currentStep < 8 ? _buildProgressBar(constraints.maxWidth, contentWidth, isTablet) : null,
+                formContent: Column(
+                  children: [
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _buildStep1(),
+                          _buildStep2(),
+                          _buildStep3(),
+                          _buildStep4(),
+                          _buildStep5(),
+                          _buildStep6(),
+                          _buildStep7(),
+                          _buildStep8(),
+                          _SuccessScreen(businessId: _savedBusinessId),
+                        ],
                       ),
                     ),
-                  ),
-                  if (_currentStep < 8)
-                    _buildBottomNav(contentWidth),
-                ],
+                    if (_currentStep < 8)
+                      _buildBottomNav(contentWidth),
+                  ],
+                ),
               );
             },
           ),
@@ -2693,9 +2869,9 @@ class _ProfilePhotoUpload extends StatelessWidget {
                 color: uploaded ? kNavyBlue : kBorderColor,
                 width: 2,
               ),
-              image: uploaded
+              image: (uploaded && getSafeImageProvider(path) != null)
                   ? DecorationImage(
-                      image: FileImage(File(path)),
+                      image: getSafeImageProvider(path)!,
                       fit: BoxFit.cover,
                     )
                   : null,
@@ -3072,9 +3248,9 @@ class _UploadBox extends StatelessWidget {
               style: BorderStyle.solid,
               width: uploaded ? 1.5 : 1,
             ),
-            image: uploaded
+            image: (uploaded && getSafeImageProvider(imagePath) != null)
                 ? DecorationImage(
-                    image: FileImage(File(imagePath)),
+                    image: getSafeImageProvider(imagePath)!,
                     fit: BoxFit.cover,
                   )
                 : null,
@@ -3184,10 +3360,12 @@ class _MultiPhotoUpload extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                     color: kNavyBlue.withOpacity(0.4)),
-                image: DecorationImage(
-                  image: FileImage(File(photos[i])),
-                  fit: BoxFit.cover,
-                ),
+                image: getSafeImageProvider(photos[i]) != null
+                    ? DecorationImage(
+                        image: getSafeImageProvider(photos[i])!,
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
               child: Stack(
                 children: [

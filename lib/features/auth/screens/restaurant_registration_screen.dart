@@ -14,6 +14,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -22,7 +23,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/mapbox_service.dart';
+import '../../../core/utils/safe_image_provider.dart';
 import '../widgets/mapbox_location_picker.dart';
+import '../widgets/web_wizard_layout.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -137,6 +140,145 @@ class _RestaurantRegistrationScreenState
 
   // ── Step 8 ──
   bool _agreementAccepted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDraft();
+  }
+
+  Future<void> _saveDraft() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final draftData = {
+        'currentStep': _currentStep,
+        'ownerName': _ownerNameCtrl.text,
+        'email': _emailCtrl.text,
+        'altMobile': _altMobileCtrl.text,
+        'profilePhotoPath': _profilePhotoPath,
+        'altCountryCode': _altCountryCode,
+        'restaurantName': _restaurantNameCtrl.text,
+        'restaurantAddress': _restaurantAddressCtrl.text,
+        'area': _areaCtrl.text,
+        'city': _cityCtrl.text,
+        'state': _stateCtrl.text,
+        'pincode': _pincodeCtrl.text,
+        'lat': _latCtrl.text,
+        'lng': _lngCtrl.text,
+        'restaurantLogoPath': _restaurantLogoPath,
+        'restaurantBannerPath': _restaurantBannerPath,
+        'restaurantPhotos': _restaurantPhotos,
+        'selectedCategories': _selectedCategories.toList(),
+        'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
+        'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
+        'workingDays': _workingDays.toList(),
+        'acceptOnlineOrders': _acceptOnlineOrders,
+        'acceptTableOrders': _acceptTableOrders,
+        'dineInAvailable': _dineInAvailable,
+        'fssaiNumber': _fssaiNumberCtrl.text,
+        'gstNumber': _gstNumberCtrl.text,
+        'tradeLicense': _tradeLicenseCtrl.text,
+        'pan': _panCtrl.text,
+        'aadhaar': _aadhaarCtrl.text,
+        'fssaiCertPath': _fssaiCertPath,
+        'gstCertPath': _gstCertPath,
+        'tradeLicensePath': _tradeLicensePath,
+        'panDocPath': _panDocPath,
+        'aadhaarDocPath': _aadhaarDocPath,
+        'accountHolder': _accountHolderCtrl.text,
+        'accountNumber': _accountNumberCtrl.text,
+        'ifsc': _ifscCtrl.text,
+        'upi': _upiCtrl.text,
+        'selectedBank': _selectedBank,
+        'cancelledChequePath': _cancelledChequePath,
+        'deliveryOption': _deliveryOption,
+        'preparationTime': _preparationTimeCtrl.text,
+        'costForTwo': _costForTwoCtrl.text,
+        'packagingCharge': _packagingChargeCtrl.text,
+        'agreementAccepted': _agreementAccepted,
+      };
+      await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_restaurant').set(draftData);
+    } catch (e) {
+      debugPrint('Draft save failed: $e');
+    }
+  }
+
+  Future<void> _loadDraft() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_restaurant').get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        setState(() {
+          _currentStep = 0;
+          _ownerNameCtrl.text = data['ownerName'] ?? '';
+          _emailCtrl.text = data['email'] ?? '';
+          _altMobileCtrl.text = data['altMobile'] ?? '';
+          _profilePhotoPath = data['profilePhotoPath'] ?? '';
+          _altCountryCode = data['altCountryCode'] ?? '+91';
+          _restaurantNameCtrl.text = data['restaurantName'] ?? '';
+          _restaurantAddressCtrl.text = data['restaurantAddress'] ?? '';
+          _areaCtrl.text = data['area'] ?? '';
+          _cityCtrl.text = data['city'] ?? '';
+          _stateCtrl.text = data['state'] ?? '';
+          _pincodeCtrl.text = data['pincode'] ?? '';
+          _latCtrl.text = data['lat'] ?? '';
+          _lngCtrl.text = data['lng'] ?? '';
+          _restaurantLogoPath = data['restaurantLogoPath'] ?? '';
+          _restaurantBannerPath = data['restaurantBannerPath'] ?? '';
+          _restaurantPhotos = List<String>.from(data['restaurantPhotos'] ?? []);
+          _selectedCategories.addAll(List<String>.from(data['selectedCategories'] ?? []));
+          
+          if (data['openingTime'] != null) {
+            final parts = data['openingTime'].split(':');
+            _openingTime = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          if (data['closingTime'] != null) {
+            final parts = data['closingTime'].split(':');
+            _closingTime = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          
+          if (data['workingDays'] != null) {
+            _workingDays.clear();
+            _workingDays.addAll(List<String>.from(data['workingDays']));
+          }
+          
+          _acceptOnlineOrders = data['acceptOnlineOrders'] ?? true;
+          _acceptTableOrders = data['acceptTableOrders'] ?? true;
+          _dineInAvailable = data['dineInAvailable'] ?? true;
+          
+          _fssaiNumberCtrl.text = data['fssaiNumber'] ?? '';
+          _gstNumberCtrl.text = data['gstNumber'] ?? '';
+          _tradeLicenseCtrl.text = data['tradeLicense'] ?? '';
+          _panCtrl.text = data['pan'] ?? '';
+          _aadhaarCtrl.text = data['aadhaar'] ?? '';
+          _fssaiCertPath = data['fssaiCertPath'] ?? '';
+          _gstCertPath = data['gstCertPath'] ?? '';
+          _tradeLicensePath = data['tradeLicensePath'] ?? '';
+          _panDocPath = data['panDocPath'] ?? '';
+          _aadhaarDocPath = data['aadhaarDocPath'] ?? '';
+          
+          _accountHolderCtrl.text = data['accountHolder'] ?? '';
+          _accountNumberCtrl.text = data['accountNumber'] ?? '';
+          _confirmAccountCtrl.text = data['accountNumber'] ?? '';
+          _ifscCtrl.text = data['ifsc'] ?? '';
+          _upiCtrl.text = data['upi'] ?? '';
+          _selectedBank = data['selectedBank'] ?? '';
+          _cancelledChequePath = data['cancelledChequePath'] ?? '';
+          
+          _deliveryOption = data['deliveryOption'] ?? 'cartkaro';
+          _preparationTimeCtrl.text = data['preparationTime'] ?? '';
+          _costForTwoCtrl.text = data['costForTwo'] ?? '';
+          _packagingChargeCtrl.text = data['packagingCharge'] ?? '';
+          _agreementAccepted = data['agreementAccepted'] ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Draft load failed: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -318,23 +460,36 @@ class _RestaurantRegistrationScreenState
       if (!mounted) return;
 
       setState(() {
-        if ((geo['address'] ?? '').isNotEmpty) _restaurantAddressCtrl.text = geo['address']!;
-        if ((geo['area'] ?? '').isNotEmpty) _areaCtrl.text = geo['area']!;
-        if ((geo['city'] ?? '').isNotEmpty) _cityCtrl.text = geo['city']!;
+        String addr = geo['address'] ?? '';
+        String area = geo['area'] ?? '';
+        String city = geo['city'] ?? '';
+        String stateRaw = geo['state'] ?? '';
+        String pin = geo['pincode'] ?? '';
 
-        if ((geo['state'] ?? '').isNotEmpty) {
-          String rawState = geo['state']!;
-          String matchedState = _indianStates.firstWhere(
-            (s) => s.toLowerCase() == rawState.toLowerCase(),
+        String matchedState = '';
+        if (stateRaw.isNotEmpty) {
+          matchedState = _indianStates.firstWhere(
+            (s) => s.toLowerCase() == stateRaw.toLowerCase(),
             orElse: () => _indianStates.firstWhere(
-              (s) => s.toLowerCase().contains(rawState.toLowerCase()) || rawState.toLowerCase().contains(s.toLowerCase()),
+              (s) => s.toLowerCase().contains(stateRaw.toLowerCase()) || stateRaw.toLowerCase().contains(s.toLowerCase()),
               orElse: () => '',
             ),
           );
-          if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
         }
 
-        if ((geo['pincode'] ?? '').isNotEmpty) _pincodeCtrl.text = geo['pincode']!;
+        List<String> parts = [];
+        if (addr.isNotEmpty) parts.add(addr);
+        if (area.isNotEmpty && !addr.toLowerCase().contains(area.toLowerCase())) parts.add(area);
+        if (city.isNotEmpty && !addr.toLowerCase().contains(city.toLowerCase())) parts.add(city);
+        if (matchedState.isNotEmpty && !addr.toLowerCase().contains(matchedState.toLowerCase())) parts.add(matchedState);
+        if (pin.isNotEmpty && !addr.toLowerCase().contains(pin.toLowerCase())) parts.add(pin);
+
+        _restaurantAddressCtrl.text = parts.join(', ');
+        
+        if (area.isNotEmpty) _areaCtrl.text = area;
+        if (city.isNotEmpty) _cityCtrl.text = city;
+        if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
+        if (pin.isNotEmpty) _pincodeCtrl.text = pin;
       });
 
       if (mounted) {
@@ -481,8 +636,9 @@ class _RestaurantRegistrationScreenState
           if (user != null) {
             final docRef = FirebaseFirestore.instance.collection('businesses').doc();
             await docRef.set({
+              'userId': user.uid,
               'ownerUid': user.uid,
-              'businessType': 'restaurant',
+              'businessType': 'restaurant', // Handles Restaurant & Cafe
               'status': 'pending',
               'isLive': false,
               'createdAt': FieldValue.serverTimestamp(),
@@ -490,6 +646,8 @@ class _RestaurantRegistrationScreenState
               'ownerName': _ownerNameCtrl.text,
               'email': _emailCtrl.text,
               'altMobile': _altMobileCtrl.text,
+              'altCountryCode': _altCountryCode,
+              'profilePhotoPath': _profilePhotoPath,
               'restaurantName': _restaurantNameCtrl.text,
               'restaurantAddress': _restaurantAddressCtrl.text,
               'area': _areaCtrl.text,
@@ -498,6 +656,9 @@ class _RestaurantRegistrationScreenState
               'pincode': _pincodeCtrl.text,
               'lat': _latCtrl.text,
               'lng': _lngCtrl.text,
+              'restaurantLogoPath': _restaurantLogoPath,
+              'restaurantBannerPath': _restaurantBannerPath,
+              'restaurantPhotos': _restaurantPhotos,
               'categories': _selectedCategories.toList(),
               'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
               'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
@@ -510,17 +671,31 @@ class _RestaurantRegistrationScreenState
               'tradeLicense': _tradeLicenseCtrl.text,
               'pan': _panCtrl.text,
               'aadhaar': _aadhaarCtrl.text,
+              'fssaiCertPath': _fssaiCertPath,
+              'gstCertPath': _gstCertPath,
+              'tradeLicensePath': _tradeLicensePath,
+              'panDocPath': _panDocPath,
+              'aadhaarDocPath': _aadhaarDocPath,
               'accountHolder': _accountHolderCtrl.text,
               'accountNumber': _accountNumberCtrl.text,
               'ifsc': _ifscCtrl.text,
               'upi': _upiCtrl.text,
               'bank': _selectedBank,
+              'cancelledChequePath': _cancelledChequePath,
               'deliveryOption': _deliveryOption,
               'preparationTime': _preparationTimeCtrl.text,
               'costForTwo': _costForTwoCtrl.text,
               'packagingCharge': _packagingChargeCtrl.text,
             });
             _savedBusinessId = docRef.id;
+            
+            // Delete draft on successful registration
+            await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_restaurant').delete();
+            
+            if (mounted) {
+              context.go('/dashboard', extra: _savedBusinessId);
+            }
+            return;
           }
         } catch (e) {
           debugPrint('Failed to save to Firestore: $e');
@@ -534,18 +709,15 @@ class _RestaurantRegistrationScreenState
       setState(() {
         _currentStep = nextPage;
       });
+      _saveDraft();
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (nextPage == 8) {
-          _pageController.jumpToPage(nextPage);
-        } else {
-          _pageController.animateToPage(
-            nextPage,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeInOut,
-          );
-        }
+        _pageController.animateToPage(
+          nextPage,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+        );
       });
     }
   }
@@ -582,37 +754,32 @@ class _RestaurantRegistrationScreenState
                       ? constraints.maxWidth * 0.85
                       : constraints.maxWidth;
 
-              return Column(
-                children: [
-                  _buildTopBar(context, isTablet),
-                  if (_currentStep < 8)
-                    _buildProgressBar(
-                        constraints.maxWidth, contentWidth, isTablet),
-                  Expanded(
-                    child: Center(
-                      child: SizedBox(
-                        width: contentWidth,
-                        child: PageView(
-                          controller: _pageController,
-                          physics: const NeverScrollableScrollPhysics(),
-                          children: [
-                            _buildStep1(),
-                            _buildStep2(),
-                            _buildStep3(),
-                            _buildStep4(),
-                            _buildStep5(),
-                            _buildStep6(),
-                            _buildStep7(),
-                            _buildStep8(),
-                            _SuccessScreen(businessId: _savedBusinessId),
-                          ],
-                        ),
+              return WebWizardLayout(
+                topBar: _buildTopBar(context, isTablet),
+                progressBar: _currentStep < 8 ? _buildProgressBar(constraints.maxWidth, contentWidth, isTablet) : null,
+                formContent: Column(
+                  children: [
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _buildStep1(),
+                          _buildStep2(),
+                          _buildStep3(),
+                          _buildStep4(),
+                          _buildStep5(),
+                          _buildStep6(),
+                          _buildStep7(),
+                          _buildStep8(),
+                          _SuccessScreen(businessId: _savedBusinessId),
+                        ],
                       ),
                     ),
-                  ),
-                  if (_currentStep < 8)
-                    _buildBottomNav(contentWidth),
-                ],
+                    if (_currentStep < 8)
+                      _buildBottomNav(contentWidth),
+                  ],
+                ),
               );
             },
           ),
@@ -898,21 +1065,36 @@ class _RestaurantRegistrationScreenState
             Map<String, String> geo = await _performReverseGeocoding(lat, lng);
             if (!mounted) return;
             setState(() {
-              if ((geo['address'] ?? '').isNotEmpty) _restaurantAddressCtrl.text = geo['address']!;
-              if ((geo['area'] ?? '').isNotEmpty) _areaCtrl.text = geo['area']!;
-              if ((geo['city'] ?? '').isNotEmpty) _cityCtrl.text = geo['city']!;
-              if ((geo['state'] ?? '').isNotEmpty) {
-                String rawState = geo['state']!;
-                String matchedState = _indianStates.firstWhere(
-                  (s) => s.toLowerCase() == rawState.toLowerCase(),
+              String addr = geo['address'] ?? '';
+              String area = geo['area'] ?? '';
+              String city = geo['city'] ?? '';
+              String stateRaw = geo['state'] ?? '';
+              String pin = geo['pincode'] ?? '';
+
+              String matchedState = '';
+              if (stateRaw.isNotEmpty) {
+                matchedState = _indianStates.firstWhere(
+                  (s) => s.toLowerCase() == stateRaw.toLowerCase(),
                   orElse: () => _indianStates.firstWhere(
-                    (s) => s.toLowerCase().contains(rawState.toLowerCase()) || rawState.toLowerCase().contains(s.toLowerCase()),
-                    orElse: () => rawState,
+                    (s) => s.toLowerCase().contains(stateRaw.toLowerCase()) || stateRaw.toLowerCase().contains(s.toLowerCase()),
+                    orElse: () => stateRaw,
                   ),
                 );
-                _stateCtrl.text = matchedState;
               }
-              if ((geo['pincode'] ?? '').isNotEmpty) _pincodeCtrl.text = geo['pincode']!;
+
+              List<String> parts = [];
+              if (addr.isNotEmpty) parts.add(addr);
+              if (area.isNotEmpty && !addr.toLowerCase().contains(area.toLowerCase())) parts.add(area);
+              if (city.isNotEmpty && !addr.toLowerCase().contains(city.toLowerCase())) parts.add(city);
+              if (matchedState.isNotEmpty && !addr.toLowerCase().contains(matchedState.toLowerCase())) parts.add(matchedState);
+              if (pin.isNotEmpty && !addr.toLowerCase().contains(pin.toLowerCase())) parts.add(pin);
+
+              _restaurantAddressCtrl.text = parts.join(', ');
+              
+              if (area.isNotEmpty) _areaCtrl.text = area;
+              if (city.isNotEmpty) _cityCtrl.text = city;
+              if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
+              if (pin.isNotEmpty) _pincodeCtrl.text = pin;
             });
           },
           isLoading: _isFetchingLocation,
@@ -925,6 +1107,13 @@ class _RestaurantRegistrationScreenState
           hint: 'Building, Street, Landmark',
           required: true,
           prefixIcon: Icons.location_on_outlined,
+          suffix: IconButton(
+            icon: _isFetchingLocation 
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) 
+                : const Icon(Icons.my_location, color: kNavyBlue),
+            tooltip: 'Fetch Current Location',
+            onPressed: _fetchRealLocation,
+          ),
           maxLines: 2,
         ),
         const SizedBox(height: 16),
@@ -2022,6 +2211,7 @@ class CustomTextField extends StatefulWidget {
   final String hint;
   final bool required;
   final IconData? prefixIcon;
+  final Widget? suffix;
   final TextInputType keyboardType;
   final bool isPassword;
   final bool obscureText;
@@ -2038,6 +2228,7 @@ class CustomTextField extends StatefulWidget {
     required this.hint,
     this.required = false,
     this.prefixIcon,
+    this.suffix,
     this.keyboardType = TextInputType.text,
     this.isPassword = false,
     this.obscureText = false,
@@ -2145,7 +2336,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
                         size: 20,
                       ),
                     )
-                  : null,
+                  : widget.suffix,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 12),
               border: OutlineInputBorder(
@@ -2561,9 +2752,9 @@ class _ProfilePhotoUpload extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(
                   color: uploaded ? kNavyBlue : kBorderColor, width: 2),
-              image: uploaded
+              image: (uploaded && getSafeImageProvider(path) != null)
                   ? DecorationImage(
-                      image: FileImage(File(path)), fit: BoxFit.cover)
+                      image: getSafeImageProvider(path)!, fit: BoxFit.cover)
                   : null,
             ),
             child: !uploaded
@@ -2911,9 +3102,9 @@ class _UploadBox extends StatelessWidget {
               style: BorderStyle.solid,
               width: uploaded ? 1.5 : 1,
             ),
-            image: uploaded
+            image: (uploaded && getSafeImageProvider(imagePath) != null)
                 ? DecorationImage(
-                    image: FileImage(File(imagePath)),
+                    image: getSafeImageProvider(imagePath)!,
                     fit: BoxFit.cover)
                 : null,
           ),
@@ -3009,9 +3200,11 @@ class _MultiPhotoUpload extends StatelessWidget {
                 color: kBlueAccent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: kNavyBlue.withOpacity(0.4)),
-                image: DecorationImage(
-                    image: FileImage(File(photos[i])),
-                    fit: BoxFit.cover),
+                image: getSafeImageProvider(photos[i]) != null
+                    ? DecorationImage(
+                        image: getSafeImageProvider(photos[i])!,
+                        fit: BoxFit.cover)
+                    : null,
               ),
               child: Stack(
                 children: [

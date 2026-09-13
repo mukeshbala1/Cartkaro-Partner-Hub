@@ -43,6 +43,13 @@ class _MapboxLocationPickerCardState extends State<MapboxLocationPickerCard> {
     _initPositionFromControllers();
     widget.latCtrl.addListener(_onControllerChange);
     widget.lngCtrl.addListener(_onControllerChange);
+    
+    // Automatically fetch GPS if location is not set yet
+    if (widget.latCtrl.text.isEmpty || widget.lngCtrl.text.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _fetchCurrentGPS();
+      });
+    }
   }
 
   @override
@@ -131,14 +138,18 @@ class _MapboxLocationPickerCardState extends State<MapboxLocationPickerCard> {
         position = await Geolocator.getLastKnownPosition();
       }
 
-      double lat = position?.latitude ?? 20.2961;
-      double lng = position?.longitude ?? 85.8245;
-
-      // If emulator returns synthetic California location (37.42... , -122.08...), override to Odisha, India
-      if (lat >= 37.4 && lat <= 37.5 && lng >= -122.1 && lng <= -122.0) {
-        lat = 20.2961;
-        lng = 85.8245;
+      if (position == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to get GPS location. Please ensure location is enabled on the device/emulator.')),
+          );
+          setState(() => _isLocating = false);
+        }
+        return;
       }
+
+      double lat = position.latitude;
+      double lng = position.longitude;
 
       final newLatLng = LatLng(lat, lng);
       setState(() {
