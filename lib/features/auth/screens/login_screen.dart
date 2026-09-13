@@ -396,13 +396,20 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
+    final savedBusinessId = await AuthService.getActiveBusinessId();
+    if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
+      if (mounted) context.go('/dashboard', extra: savedBusinessId);
+      return;
+    }
+
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       try {
         final querySnapshot = await FirebaseFirestore.instance
             .collection('businesses')
             .where('ownerUid', isEqualTo: user.uid)
-            .get();
+            .get()
+            .timeout(const Duration(seconds: 2));
 
         if (!mounted) return;
 
@@ -410,7 +417,9 @@ class _LoginScreenState extends State<LoginScreen>
           _transitionTo(_Step.success);
           return;
         } else if (querySnapshot.docs.length == 1) {
-          context.go('/dashboard', extra: querySnapshot.docs.first.id);
+          final bId = querySnapshot.docs.first.id;
+          await AuthService.saveActiveBusinessId(bId);
+          if (mounted) context.go('/dashboard', extra: bId);
           return;
         } else {
           context.go('/business-selector');

@@ -45,10 +45,21 @@ class _PinLoginScreenState extends State<PinLoginScreen>
 
   Future<void> _fetchUserName() async {
     try {
+      // 1. Instant check from local cache
+      final cachedName = await AuthService.getOwnerName();
+      if (cachedName != null && cachedName.trim().isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _userName = cachedName.trim().split(' ').first;
+          });
+        }
+        return;
+      }
+
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // 1. Check FirebaseAuth displayName
+      // 2. Instant check from FirebaseAuth
       final authName = user.displayName?.trim();
       if (authName != null && authName.isNotEmpty) {
         if (mounted) {
@@ -56,49 +67,44 @@ class _PinLoginScreenState extends State<PinLoginScreen>
             _userName = authName.split(' ').first;
           });
         }
+        await AuthService.saveOwnerName(authName);
         return;
       }
 
-      // 2. Query Firestore businesses collection
-      final businessSnap = await FirebaseFirestore.instance
-          .collection('businesses')
-          .where('ownerUid', isEqualTo: user.uid)
-          .limit(1)
-          .get();
-
-      if (businessSnap.docs.isNotEmpty) {
-        final data = businessSnap.docs.first.data();
-        final ownerName = (data['ownerName'] as String?)?.trim();
-        if (ownerName != null && ownerName.isNotEmpty) {
-          if (mounted) {
-            setState(() {
-              _userName = ownerName.split(' ').first;
-            });
-          }
-          return;
-        }
-      }
-
-      // 3. Query Firestore users collection
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (userDoc.exists) {
-        final data = userDoc.data();
-        final name = (data?['name'] ?? data?['fullName']) as String?;
-        if (name != null && name.trim().isNotEmpty) {
-          if (mounted) {
-            setState(() {
-              _userName = name.trim().split(' ').first;
-            });
-          }
-        }
-      }
+      // 3. Fast non-blocking background fetch if no cached name exists
+      _fetchUserNameFromFirestoreAsync(user.uid);
     } catch (e) {
       debugPrint('Error fetching user name: $e');
     }
+  }
+
+  void _fetchUserNameFromFirestoreAsync(String uid) {
+    Future.microtask(() async {
+      try {
+        final businessSnap = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: uid)
+            .limit(1)
+            .get(const GetOptions(source: Source.serverAndCache))
+            .timeout(const Duration(milliseconds: 1200));
+
+        if (businessSnap.docs.isNotEmpty) {
+          final data = businessSnap.docs.first.data();
+          final ownerName = (data['ownerName'] as String?)?.trim();
+          if (ownerName != null && ownerName.isNotEmpty) {
+            if (mounted) {
+              setState(() {
+                _userName = ownerName.split(' ').first;
+              });
+            }
+            await AuthService.saveOwnerName(ownerName);
+            await AuthService.saveActiveBusinessId(businessSnap.docs.first.id);
+          }
+        }
+      } catch (_) {
+        // Ignored in background
+      }
+    });
   }
 
   Future<void> _initBiometric() async {
@@ -107,9 +113,9 @@ class _PinLoginScreenState extends State<PinLoginScreen>
       setState(() {
         _bioInfo = info;
       });
-      // Auto-trigger biometric on screen load ONLY if enrolled & enabled by user
+      // Auto-trigger biometric on screen load instantly if enrolled & enabled
       if (info.isEnabledByUser && info.isEnrolled) {
-        Future.delayed(const Duration(milliseconds: 600), () => _tryBiometric(isAuto: true));
+        Future.delayed(const Duration(milliseconds: 100), () => _tryBiometric(isAuto: true));
       }
     }
   }
@@ -125,12 +131,13 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   void _onDigit(String digit) {
     HapticFeedback.lightImpact();
     if (_pin.length >= 4 || _loading) return;
+    final nextPin = _pin + digit;
     setState(() {
       _errorMsg = '';
-      _pin += digit;
+      _pin = nextPin;
     });
-    if (_pin.length == 4) {
-      Future.delayed(const Duration(milliseconds: 180), _verifyPin);
+    if (nextPin.length == 4) {
+      _verifyPin();
     }
   }
 
@@ -272,32 +279,43 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   }
 
   Future<void> _navigateToDashboard() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) context.go('/login');
+      return;
+    }
+
+    // 1. Instant navigation if we already have a cached business ID
+    final savedBusinessId = await AuthService.getActiveBusinessId();
+    if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
+      if (mounted) context.go('/dashboard', extra: savedBusinessId);
+      return;
+    }
+
+    // 2. Otherwise quickly check Firestore
+    if (mounted) {
+      setState(() => _loading = true);
+    }
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        if (mounted) context.go('/login');
-        return;
-      }
       final snap = await FirebaseFirestore.instance
           .collection('businesses')
           .where('ownerUid', isEqualTo: user.uid)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 2));
+
       if (!mounted) return;
       if (snap.docs.isEmpty) {
         context.go('/business-type');
       } else if (snap.docs.length == 1) {
-        context.go('/dashboard', extra: snap.docs.first.id);
+        final bId = snap.docs.first.id;
+        await AuthService.saveActiveBusinessId(bId);
+        if (mounted) context.go('/dashboard', extra: bId);
       } else {
         context.go('/business-selector');
       }
     } catch (e) {
-      debugPrint('Navigation error: $e');
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _errorMsg = 'Something went wrong. Please try again.';
-        });
-      }
+      debugPrint('Quick business check error: $e');
+      if (mounted) context.go('/business-type');
     }
   }
 

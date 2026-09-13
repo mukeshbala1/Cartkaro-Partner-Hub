@@ -247,20 +247,41 @@ class _PinSetupScreenState extends State<PinSetupScreen>
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        context.go('/login');
+        if (mounted) context.go('/login');
         return;
       }
-      final snap = await FirebaseFirestore.instance
-          .collection('businesses')
-          .where('ownerUid', isEqualTo: user.uid)
-          .get();
-      if (!mounted) return;
-      if (snap.docs.isEmpty) {
-        context.go('/business-type');
-      } else if (snap.docs.length == 1) {
-        context.go('/dashboard', extra: snap.docs.first.id);
-      } else {
-        context.go('/business-selector');
+
+      final savedBusinessId = await AuthService.getActiveBusinessId();
+
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: user.uid)
+            .get()
+            .timeout(const Duration(seconds: 4));
+
+        if (!mounted) return;
+        if (snap.docs.isEmpty) {
+          if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
+            context.go('/dashboard', extra: savedBusinessId);
+          } else {
+            context.go('/business-type');
+          }
+        } else if (snap.docs.length == 1) {
+          final bId = snap.docs.first.id;
+          await AuthService.saveActiveBusinessId(bId);
+          context.go('/dashboard', extra: bId);
+        } else {
+          context.go('/business-selector');
+        }
+      } catch (firestoreError) {
+        debugPrint('Firestore query in PIN setup handled: $firestoreError');
+        if (!mounted) return;
+        if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
+          context.go('/dashboard', extra: savedBusinessId);
+        } else {
+          context.go('/business-type');
+        }
       }
     } catch (e) {
       debugPrint('Error after PIN setup: $e');

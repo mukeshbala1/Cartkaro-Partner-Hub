@@ -20,17 +20,20 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(seconds: 2),
+      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
+    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
     
     _controller.forward();
     _checkLoginStatus();
   }
 
   Future<void> _checkLoginStatus() async {
-    await Future.delayed(const Duration(seconds: 3));
+    final results = await Future.wait([
+      Future.delayed(const Duration(milliseconds: 600)),
+      AuthService.isPinSet(),
+    ]);
     if (!mounted) return;
 
     final user = FirebaseAuth.instance.currentUser;
@@ -41,21 +44,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       return;
     }
 
-    // User is logged in — check PIN status
-    try {
-      final pinSet = await AuthService.isPinSet();
-      if (!mounted) return;
-
-      if (!pinSet) {
-        // First time on this device — need to set up PIN
-        context.go('/pin-setup');
-      } else {
-        // PIN exists → gate entry with PIN / biometric
-        context.go('/pin-login');
-      }
-    } catch (e) {
-      debugPrint('Error checking PIN status: $e');
-      if (!mounted) return;
+    final pinSet = results[1] as bool? ?? false;
+    if (!pinSet) {
+      context.go('/pin-setup');
+    } else {
       context.go('/pin-login');
     }
   }

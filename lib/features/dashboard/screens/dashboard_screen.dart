@@ -61,6 +61,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _business = BusinessModel.fromFirestore(data, doc.id);
             _isLoading = false;
           });
+          if (widget.businessId != null) {
+            await AuthService.saveActiveBusinessId(widget.businessId!);
+          }
+          if (_business.ownerName.isNotEmpty) {
+            await AuthService.saveOwnerName(_business.ownerName);
+          }
+          if (_business.businessType.isNotEmpty) {
+            await AuthService.saveBusinessType(_business.businessType);
+          }
           widget.onBusinessChanged(_business.businessType);
           return;
         }

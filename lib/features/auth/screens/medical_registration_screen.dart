@@ -26,6 +26,7 @@ import '../../../core/services/mapbox_service.dart';
 import '../../../core/utils/safe_image_provider.dart';
 import '../widgets/mapbox_location_picker.dart';
 import '../widgets/web_wizard_layout.dart';
+import '../../../core/services/auth_service.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -754,6 +755,9 @@ class _MedicalRegistrationScreenState
               'isEmergencyDelivery': _isEmergencyDelivery,
             });
             _savedBusinessId = docRef.id;
+            await AuthService.saveActiveBusinessId(_savedBusinessId!);
+            await AuthService.saveOwnerName(_ownerNameCtrl.text);
+            await AuthService.saveBusinessType('medical');
             
             // Delete draft on successful registration
             await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_medical').delete();

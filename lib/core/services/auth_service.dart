@@ -84,6 +84,44 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pinKey);
     await prefs.remove(_biometricEnabledKey);
+    await prefs.remove(_businessIdKey);
+    await prefs.remove(_ownerNameKey);
+    await prefs.remove(_businessTypeKey);
+  }
+
+  // ─── Business Session Caching ──────────────────────────────────
+  static const String _businessIdKey = 'ck_active_business_id';
+  static const String _ownerNameKey = 'ck_owner_name';
+  static const String _businessTypeKey = 'ck_business_type';
+
+  static Future<void> saveActiveBusinessId(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_businessIdKey, id);
+  }
+
+  static Future<String?> getActiveBusinessId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_businessIdKey);
+  }
+
+  static Future<void> saveOwnerName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_ownerNameKey, name);
+  }
+
+  static Future<String?> getOwnerName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_ownerNameKey);
+  }
+
+  static Future<void> saveBusinessType(String type) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_businessTypeKey, type);
+  }
+
+  static Future<String?> getBusinessType() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_businessTypeKey);
   }
 
   // ─── User Preference: Biometric Opt-in ─────────────────────────

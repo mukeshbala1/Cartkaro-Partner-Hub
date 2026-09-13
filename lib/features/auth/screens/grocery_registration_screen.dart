@@ -26,6 +26,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/utils/safe_image_provider.dart';
+import '../../../core/services/auth_service.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -736,6 +737,9 @@ class _GroceryRegistrationScreenState
               'estDelivery': _estDeliveryCtrl.text,
             });
             _savedBusinessId = docRef.id;
+            await AuthService.saveActiveBusinessId(_savedBusinessId!);
+            await AuthService.saveOwnerName(_ownerNameCtrl.text);
+            await AuthService.saveBusinessType('grocery');
             
             // Delete draft on successful registration
             await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_grocery').delete();

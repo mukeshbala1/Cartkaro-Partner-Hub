@@ -124,7 +124,12 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
                                     return _buildBusinessCard(
                                       name: name,
                                       type: type,
-                                      onTap: () => context.go('/dashboard', extra: doc.id),
+                                      onTap: () async {
+                                        await AuthService.saveActiveBusinessId(doc.id);
+                                        if (context.mounted) {
+                                          context.go('/dashboard', extra: doc.id);
+                                        }
+                                      },
                                     );
                                   },
                                 );
@@ -146,7 +151,12 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
                                     return _buildBusinessCard(
                                       name: name,
                                       type: type,
-                                      onTap: () => context.go('/dashboard', extra: doc.id),
+                                      onTap: () async {
+                                        await AuthService.saveActiveBusinessId(doc.id);
+                                        if (context.mounted) {
+                                          context.go('/dashboard', extra: doc.id);
+                                        }
+                                      },
                                     );
                                   },
                                 );
