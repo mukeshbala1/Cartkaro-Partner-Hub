@@ -212,7 +212,8 @@ class _GroceryRegistrationScreenState
           _ownerNameCtrl.text = data['ownerName'] ?? '';
           _emailCtrl.text = data['email'] ?? '';
           _altMobileCtrl.text = data['altMobile'] ?? '';
-          _profilePhotoPath = data['profilePhotoPath'] ?? '';
+          final loadedProfile = (data['profilePhotoPath'] ?? '').toString().trim();
+          _profilePhotoPath = (loadedProfile.isNotEmpty && getSafeImageProvider(loadedProfile) != null) ? loadedProfile : '';
           _altCountryCode = data['altCountryCode'] ?? '+91';
           _storeNameCtrl.text = data['storeName'] ?? '';
           _storeAddressCtrl.text = data['storeAddress'] ?? '';
@@ -222,9 +223,12 @@ class _GroceryRegistrationScreenState
           _pincodeCtrl.text = data['pincode'] ?? '';
           _latCtrl.text = data['lat'] ?? '';
           _lngCtrl.text = data['lng'] ?? '';
-          _storeLogoPath = data['storeLogoPath'] ?? '';
-          _storeBannerPath = data['storeBannerPath'] ?? '';
-          _storePhotos = List<String>.from(data['storePhotos'] ?? []);
+          final loadedLogo = (data['storeLogoPath'] ?? '').toString().trim();
+          _storeLogoPath = (loadedLogo.isNotEmpty && getSafeImageProvider(loadedLogo) != null) ? loadedLogo : '';
+          final loadedBanner = (data['storeBannerPath'] ?? '').toString().trim();
+          _storeBannerPath = (loadedBanner.isNotEmpty && getSafeImageProvider(loadedBanner) != null) ? loadedBanner : '';
+          final loadedPhotos = List<String>.from(data['storePhotos'] ?? []);
+          _storePhotos = loadedPhotos.where((p) => p.trim().isNotEmpty && getSafeImageProvider(p) != null).toList();
           _selectedCategories.addAll(List<String>.from(data['selectedCategories'] ?? []));
           
           if (data['openingTime'] != null) {
@@ -692,6 +696,19 @@ class _GroceryRegistrationScreenState
       return;
     }
 
+    // Step 0 (Step 1 in UI - Owner Details): Profile Photo is Mandatory
+    if (_currentStep == 0) {
+      if (_profilePhotoPath.trim().isEmpty || getSafeImageProvider(_profilePhotoPath) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload Owner Profile Photo"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
+
     // Step 1 (Step 2 in UI - Store Details): Logo, Banner, and Photos are Mandatory
     if (_currentStep == 1) {
       if (_storeLogoPath.isEmpty) {
@@ -864,6 +881,8 @@ class _GroceryRegistrationScreenState
             'pincode': _pincodeCtrl.text.trim(),
             'lat': _latCtrl.text.trim(),
             'lng': _lngCtrl.text.trim(),
+            'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
+            'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
             'logoUrl': _storeLogoPath,
             'storeLogoPath': _storeLogoPath,
             'bannerUrl': _storeBannerPath,
@@ -1236,13 +1255,13 @@ class _GroceryRegistrationScreenState
       subtitle: 'Your account details for CartKaro Partner Hub',
       icon: Icons.person_outline_rounded,
       children: [
-        _SectionLabel(label: 'Profile Photo'),
+        _SectionLabel(label: 'Profile Photo (Required) *'),
         Center(
           child: _ProfilePhotoUpload(
             path: _profilePhotoPath,
             onTap: () => _pickImage(
               ImageSource.gallery,
-              (path) => _profilePhotoPath = path,
+              (path) => setState(() => _profilePhotoPath = path),
             ),
           ),
         ),
@@ -3037,7 +3056,8 @@ class _ProfilePhotoUpload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uploaded = path.isNotEmpty;
+    final imageProvider = getSafeImageProvider(path);
+    final uploaded = path.trim().isNotEmpty && imageProvider != null;
     return GestureDetector(
       onTap: onTap,
       child: Stack(
@@ -3052,9 +3072,9 @@ class _ProfilePhotoUpload extends StatelessWidget {
                 color: uploaded ? kNavyBlue : kBorderColor,
                 width: 2,
               ),
-              image: (uploaded && getSafeImageProvider(path) != null)
+              image: uploaded
                   ? DecorationImage(
-                      image: getSafeImageProvider(path)!,
+                      image: imageProvider!,
                       fit: BoxFit.cover,
                     )
                   : null,

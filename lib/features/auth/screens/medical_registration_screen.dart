@@ -221,7 +221,8 @@ class _MedicalRegistrationScreenState
           _ownerNameCtrl.text = data['ownerName'] ?? '';
           _emailCtrl.text = data['email'] ?? '';
           _altMobileCtrl.text = data['altMobile'] ?? '';
-          _profilePhotoPath = data['profilePhotoPath'] ?? '';
+          final loadedProfile = (data['profilePhotoPath'] ?? '').toString().trim();
+          _profilePhotoPath = (loadedProfile.isNotEmpty && getSafeImageProvider(loadedProfile) != null) ? loadedProfile : '';
           _altCountryCode = data['altCountryCode'] ?? '+91';
           _medicalNameCtrl.text = data['medicalName'] ?? '';
           _medicalAddressCtrl.text = data['medicalAddress'] ?? '';
@@ -231,9 +232,12 @@ class _MedicalRegistrationScreenState
           _pincodeCtrl.text = data['pincode'] ?? '';
           _latCtrl.text = data['lat'] ?? '';
           _lngCtrl.text = data['lng'] ?? '';
-          _medicalLogo = data['medicalLogo'] ?? '';
-          _medicalBanner = data['medicalBanner'] ?? '';
-          _medicalPhotos = List<String>.from(data['medicalPhotos'] ?? []);
+          final loadedLogo = (data['medicalLogo'] ?? '').toString().trim();
+          _medicalLogo = (loadedLogo.isNotEmpty && getSafeImageProvider(loadedLogo) != null) ? loadedLogo : '';
+          final loadedBanner = (data['medicalBanner'] ?? '').toString().trim();
+          _medicalBanner = (loadedBanner.isNotEmpty && getSafeImageProvider(loadedBanner) != null) ? loadedBanner : '';
+          final loadedPhotos = List<String>.from(data['medicalPhotos'] ?? []);
+          _medicalPhotos = loadedPhotos.where((p) => p.trim().isNotEmpty && getSafeImageProvider(p) != null).toList();
           _selectedCategories.addAll(List<String>.from(data['selectedCategories'] ?? []));
           
           if (data['openingTime'] != null) {
@@ -706,6 +710,19 @@ class _MedicalRegistrationScreenState
       return;
     }
 
+    // Step 0 (Step 1 in UI - Owner Details): Profile Photo is Mandatory
+    if (_currentStep == 0) {
+      if (_profilePhotoPath.trim().isEmpty || getSafeImageProvider(_profilePhotoPath) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload Owner Profile Photo"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
+
     // Step 1 (Step 2 in UI - Medical Store Details): Logo, Banner, and Photos are Mandatory
     if (_currentStep == 1) {
       if (_medicalLogo.isEmpty) {
@@ -878,6 +895,8 @@ class _MedicalRegistrationScreenState
             'pincode': _pincodeCtrl.text.trim(),
             'lat': _latCtrl.text.trim(),
             'lng': _lngCtrl.text.trim(),
+            'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
+            'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
             'logoUrl': _medicalLogo,
             'medicalLogo': _medicalLogo,
             'bannerUrl': _medicalBanner,
@@ -1247,13 +1266,13 @@ class _MedicalRegistrationScreenState
       subtitle: 'Your account details for CartKaro Partner Hub',
       icon: Icons.person_outline_rounded,
       children: [
-        _SectionLabel(label: 'Profile Photo'),
+        _SectionLabel(label: 'Profile Photo (Required) *'),
         Center(
           child: _ProfilePhotoUpload(
             path: _profilePhotoPath,
             onTap: () => _pickImage(
               ImageSource.gallery,
-              (path) => _profilePhotoPath = path,
+              (path) => setState(() => _profilePhotoPath = path),
             ),
           ),
         ),
@@ -2976,7 +2995,8 @@ class _ProfilePhotoUpload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uploaded = path.isNotEmpty;
+    final imageProvider = getSafeImageProvider(path);
+    final uploaded = path.trim().isNotEmpty && imageProvider != null;
     return GestureDetector(
       onTap: onTap,
       child: Stack(
@@ -2989,9 +3009,9 @@ class _ProfilePhotoUpload extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(
                   color: uploaded ? kNavyBlue : kBorderColor, width: 2),
-              image: (uploaded && getSafeImageProvider(path) != null)
+              image: uploaded
                   ? DecorationImage(
-                      image: getSafeImageProvider(path)!, fit: BoxFit.cover)
+                      image: imageProvider!, fit: BoxFit.cover)
                   : null,
             ),
             child: !uploaded

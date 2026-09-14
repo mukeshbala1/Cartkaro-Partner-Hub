@@ -214,7 +214,8 @@ class _RestaurantRegistrationScreenState
           _ownerNameCtrl.text = data['ownerName'] ?? '';
           _emailCtrl.text = data['email'] ?? '';
           _altMobileCtrl.text = data['altMobile'] ?? '';
-          _profilePhotoPath = data['profilePhotoPath'] ?? '';
+          final loadedProfile = (data['profilePhotoPath'] ?? '').toString().trim();
+          _profilePhotoPath = (loadedProfile.isNotEmpty && getSafeImageProvider(loadedProfile) != null) ? loadedProfile : '';
           _altCountryCode = data['altCountryCode'] ?? '+91';
           _restaurantNameCtrl.text = data['restaurantName'] ?? '';
           _restaurantAddressCtrl.text = data['restaurantAddress'] ?? '';
@@ -649,6 +650,19 @@ class _RestaurantRegistrationScreenState
       return;
     }
 
+    // Step 0 (Step 1 in UI - Owner Details): Profile Photo is Mandatory
+    if (_currentStep == 0) {
+      if (_profilePhotoPath.trim().isEmpty || getSafeImageProvider(_profilePhotoPath) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload Owner Profile Photo"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
+
     // Step 1 (Step 2 in UI - Restaurant Details): Logo, Banner, and Photos are Mandatory
     if (_currentStep == 1) {
       if (_restaurantLogoPath.isEmpty) {
@@ -821,6 +835,8 @@ class _RestaurantRegistrationScreenState
             'pincode': _pincodeCtrl.text.trim(),
             'lat': _latCtrl.text.trim(),
             'lng': _lngCtrl.text.trim(),
+            'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
+            'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
             'logoUrl': _restaurantLogoPath,
             'restaurantLogoPath': _restaurantLogoPath,
             'bannerUrl': _restaurantBannerPath,
@@ -1189,13 +1205,13 @@ class _RestaurantRegistrationScreenState
       subtitle: 'Your account details for CartKaro Partner Hub',
       icon: Icons.person_outline_rounded,
       children: [
-        _SectionLabel(label: 'Profile Photo (Optional)'),
+        _SectionLabel(label: 'Profile Photo (Required) *'),
         Center(
           child: _ProfilePhotoUpload(
             path: _profilePhotoPath,
             onTap: () => _pickImage(
               ImageSource.gallery,
-              (path) => _profilePhotoPath = path,
+              (path) => setState(() => _profilePhotoPath = path),
             ),
           ),
         ),
@@ -2898,7 +2914,8 @@ class _ProfilePhotoUpload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uploaded = path.isNotEmpty;
+    final imageProvider = getSafeImageProvider(path);
+    final uploaded = path.trim().isNotEmpty && imageProvider != null;
     return GestureDetector(
       onTap: onTap,
       child: Stack(
@@ -2911,9 +2928,9 @@ class _ProfilePhotoUpload extends StatelessWidget {
               shape: BoxShape.circle,
               border: Border.all(
                   color: uploaded ? kNavyBlue : kBorderColor, width: 2),
-              image: (uploaded && getSafeImageProvider(path) != null)
+              image: uploaded
                   ? DecorationImage(
-                      image: getSafeImageProvider(path)!, fit: BoxFit.cover)
+                      image: imageProvider!, fit: BoxFit.cover)
                   : null,
             ),
             child: !uploaded
