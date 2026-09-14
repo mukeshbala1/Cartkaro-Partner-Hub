@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive.dart';
 import '../../../core/services/auth_service.dart';
@@ -14,6 +16,9 @@ class BusinessTypeScreen extends StatefulWidget {
 
 class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
   String? _selectedCategory;
+  Map<String, String> _registeredBusinesses = {}; // type -> businessId
+  Map<String, String> _registeredStoreNames = {}; // type -> storeName
+  bool _isLoading = true;
 
   final List<_CategoryData> _categories = const [
     _CategoryData(
@@ -42,6 +47,51 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
     ),
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadUserBusinesses();
+  }
+
+  Future<void> _loadUserBusinesses() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final snap = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: user.uid)
+            .get()
+            .timeout(const Duration(seconds: 4));
+
+        final Map<String, String> registered = {};
+        final Map<String, String> names = {};
+
+        for (var doc in snap.docs) {
+          final data = doc.data();
+          final type = (data['businessType'] as String?)?.toLowerCase();
+          final name = data['storeName'] ?? data['restaurantName'] ?? data['medicalName'] ?? data['name'] ?? 'Store';
+          if (type != null && type.isNotEmpty) {
+            registered[type] = doc.id;
+            names[type] = name.toString();
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _registeredBusinesses = registered;
+            _registeredStoreNames = names;
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint('Error loading businesses for business type screen: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _handleBack() async {
     final hasPin = await AuthService.isPinSet();
     if (!mounted) return;
@@ -54,7 +104,59 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
     }
   }
 
-  void _onCategorySelected(String categoryId) {
+  Future<void> _onCategorySelected(String categoryId) async {
+    // 1. If already registered under this mobile number, open its dashboard directly
+    if (_registeredBusinesses.containsKey(categoryId)) {
+      final bId = _registeredBusinesses[categoryId]!;
+      await AuthService.saveActiveBusinessId(bId);
+      await AuthService.saveBusinessType(categoryId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Opening ${_registeredStoreNames[categoryId] ?? 'your store'} dashboard...'),
+            backgroundColor: const Color(0xFF059669),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        context.go('/dashboard', extra: bId);
+      }
+      return;
+    }
+
+    // 2. If already 3 businesses registered (capacity full)
+    if (_registeredBusinesses.length >= 3) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Row(
+              children: [
+                Icon(LucideIcons.shieldAlert, color: Color(0xFFEA580C)),
+                SizedBox(width: 10),
+                Text("Business Limit Reached"),
+              ],
+            ),
+            content: const Text(
+              "One mobile number can register up to 3 businesses (1 Grocery, 1 Restaurant, and 1 Medical).\n\nYour account has already registered all 3 business categories.",
+              style: TextStyle(fontSize: 14, height: 1.5),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  context.go('/business-selector');
+                },
+                child: const Text("View My Businesses"),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    // 3. Category is available to register
     setState(() => _selectedCategory = categoryId);
     Future.delayed(const Duration(milliseconds: 140), () {
       if (mounted) {
@@ -66,6 +168,7 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
   @override
   Widget build(BuildContext context) {
     final isMobile = Responsive.isMobile(context);
+    final regCount = _registeredBusinesses.length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -111,14 +214,14 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: AppColors.kPrimary.withValues(alpha: 0.15)),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(LucideIcons.sparkles, size: 13, color: AppColors.kPrimary),
-                    SizedBox(width: 5),
+                    const Icon(LucideIcons.sparkles, size: 13, color: AppColors.kPrimary),
+                    const SizedBox(width: 5),
                     Text(
-                      'Step 1 of 2',
-                      style: TextStyle(
+                      '$regCount/3 Registered',
+                      style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: AppColors.kPrimary,
@@ -166,17 +269,87 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
                       height: 1.45,
                     ),
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 18),
+
+                  // 1 Number = 3 Business Info Banner
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.02),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: AppColors.kPrimary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Center(
+                            child: Icon(LucideIcons.layers, size: 20, color: AppColors.kPrimary),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                regCount >= 3
+                                    ? 'All 3 Categories Registered (Maximum Capacity)'
+                                    : '1 Mobile Number = Up to 3 Businesses ($regCount of 3 Active)',
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                regCount >= 3
+                                    ? 'Grocery, Restaurant & Medical stores are all registered. Tap any store to open its dashboard.'
+                                    : 'You can register 1 Grocery, 1 Restaurant, and 1 Medical Store under this account.',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+
                   if (!isMobile)
                     Row(
                       children: _categories.map((cat) {
+                        final isRegistered = _registeredBusinesses.containsKey(cat.id);
+                        final registeredName = _registeredStoreNames[cat.id];
                         final isSelected = _selectedCategory == cat.id;
+                        final isCapacityFull = regCount >= 3 && !isRegistered;
+
                         return Expanded(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8),
                             child: _CategoryCard(
                               category: cat,
                               isSelected: isSelected,
+                              isRegistered: isRegistered,
+                              registeredStoreName: registeredName,
+                              isCapacityFull: isCapacityFull,
                               isVerticalLayout: true,
                               onTap: () => _onCategorySelected(cat.id),
                             ),
@@ -186,52 +359,24 @@ class _BusinessTypeScreenState extends State<BusinessTypeScreen> {
                     )
                   else
                     ..._categories.map((cat) {
+                      final isRegistered = _registeredBusinesses.containsKey(cat.id);
+                      final registeredName = _registeredStoreNames[cat.id];
                       final isSelected = _selectedCategory == cat.id;
+                      final isCapacityFull = regCount >= 3 && !isRegistered;
+
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 16),
                         child: _CategoryCard(
                           category: cat,
                           isSelected: isSelected,
+                          isRegistered: isRegistered,
+                          registeredStoreName: registeredName,
+                          isCapacityFull: isCapacityFull,
                           onTap: () => _onCategorySelected(cat.id),
                         ),
                       );
                     }),
-                  const SizedBox(height: 20),
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x04000000),
-                            blurRadius: 8,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(LucideIcons.store, size: 14, color: AppColors.kPrimary),
-                          SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              'You can add more store categories or branches anytime',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                color: Color(0xFF475569),
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                 ],
               ),
             ),
@@ -263,12 +408,18 @@ class _CategoryData {
 class _CategoryCard extends StatefulWidget {
   final _CategoryData category;
   final bool isSelected;
+  final bool isRegistered;
+  final String? registeredStoreName;
+  final bool isCapacityFull;
   final VoidCallback onTap;
   final bool isVerticalLayout;
 
   const _CategoryCard({
     required this.category,
     required this.isSelected,
+    this.isRegistered = false,
+    this.registeredStoreName,
+    this.isCapacityFull = false,
     required this.onTap,
     this.isVerticalLayout = false,
   });
@@ -283,7 +434,15 @@ class _CategoryCardState extends State<_CategoryCard> {
   @override
   Widget build(BuildContext context) {
     final cat = widget.category;
-    final active = widget.isSelected || _isHovered;
+    final isRegistered = widget.isRegistered;
+    final isFull = widget.isCapacityFull;
+    final active = (widget.isSelected || _isHovered) && !isFull;
+
+    final borderColor = isRegistered
+        ? const Color(0xFF059669)
+        : active
+            ? cat.accentColor
+            : const Color(0xFFE2E8F0);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -292,19 +451,21 @@ class _CategoryCardState extends State<_CategoryCard> {
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isFull ? const Color(0xFFF8FAFC) : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: active ? cat.accentColor : const Color(0xFFE2E8F0),
-            width: active ? 2.0 : 1.2,
+            color: borderColor,
+            width: (active || isRegistered) ? 2.0 : 1.2,
           ),
           boxShadow: [
             BoxShadow(
-              color: active
-                  ? cat.accentColor.withValues(alpha: 0.14)
-                  : const Color(0x06000000),
-              blurRadius: active ? 16 : 8,
-              offset: Offset(0, active ? 5 : 2),
+              color: isRegistered
+                  ? const Color(0xFF059669).withOpacity(0.12)
+                  : active
+                      ? cat.accentColor.withValues(alpha: 0.14)
+                      : const Color(0x06000000),
+              blurRadius: (active || isRegistered) ? 16 : 8,
+              offset: Offset(0, (active || isRegistered) ? 5 : 2),
             ),
           ],
         ),
@@ -323,7 +484,7 @@ class _CategoryCardState extends State<_CategoryCard> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // 3D AI Logo Container
+                        // Logo Container
                         Container(
                           width: 84,
                           height: 84,
@@ -331,98 +492,169 @@ class _CategoryCardState extends State<_CategoryCard> {
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(22),
                             border: Border.all(
-                              color: cat.accentColor.withValues(alpha: 0.15),
+                              color: isRegistered
+                                  ? const Color(0xFF059669).withOpacity(0.3)
+                                  : cat.accentColor.withValues(alpha: 0.15),
                               width: 1.2,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: cat.accentColor.withValues(alpha: 0.10),
+                                color: isRegistered
+                                    ? const Color(0xFF059669).withOpacity(0.15)
+                                    : cat.accentColor.withValues(alpha: 0.10),
                                 blurRadius: 10,
                                 offset: const Offset(0, 3),
                               ),
                             ],
                           ),
                           clipBehavior: Clip.antiAlias,
-                          child: Image.asset(
-                            cat.imagePath,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Center(
-                                child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
-                              );
-                            },
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.asset(
+                                cat.imagePath,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
+                                  );
+                                },
+                              ),
+                              if (isRegistered)
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(3),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF059669),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(LucideIcons.check, color: Colors.white, size: 12),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // Title & Badge
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                cat.title,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 17.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0F172A),
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                            ),
-                          ],
+                        // Title
+                        Text(
+                          cat.title,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 17.5,
+                            fontWeight: FontWeight.w800,
+                            color: isFull ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
+                            letterSpacing: -0.3,
+                          ),
                         ),
                         const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
-                          decoration: BoxDecoration(
-                            color: cat.accentColor.withValues(alpha: 0.09),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            cat.badgeText,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: cat.accentColor,
-                              letterSpacing: 0.2,
+
+                        // Badge
+                        if (isRegistered)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF059669).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFF059669).withOpacity(0.35)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(LucideIcons.checkCircle2, size: 12, color: Color(0xFF059669)),
+                                SizedBox(width: 5),
+                                Text(
+                                  'Registered • Tap to Open',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF059669),
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (isFull)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF94A3B8).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'Max 3 Reached',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF64748B),
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
+                            decoration: BoxDecoration(
+                              color: cat.accentColor.withValues(alpha: 0.09),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              cat.badgeText,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: cat.accentColor,
+                                letterSpacing: 0.2,
+                              ),
                             ),
                           ),
-                        ),
                         const SizedBox(height: 12),
+
+                        // Subtitle
                         Text(
-                          cat.subtitle,
+                          isRegistered && widget.registeredStoreName != null
+                              ? 'Active Store: ${widget.registeredStoreName}\nTap to open your live dashboard.'
+                              : cat.subtitle,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.8,
-                            color: Color(0xFF64748B),
+                            color: isRegistered ? const Color(0xFF0F172A) : const Color(0xFF64748B),
                             height: 1.4,
-                            fontWeight: FontWeight.w400,
+                            fontWeight: isRegistered ? FontWeight.w500 : FontWeight.w400,
                           ),
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 16),
-                        // Forward Arrow Action
+
+                        // Action Icon
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           width: 36,
                           height: 36,
                           decoration: BoxDecoration(
-                            color: active ? cat.accentColor : const Color(0xFFF1F5F9),
+                            color: isRegistered
+                                ? const Color(0xFF059669)
+                                : active
+                                    ? cat.accentColor
+                                    : const Color(0xFFF1F5F9),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            LucideIcons.chevronRight,
+                            isRegistered
+                                ? LucideIcons.layoutDashboard
+                                : LucideIcons.chevronRight,
                             size: 18,
-                            color: active ? Colors.white : const Color(0xFF64748B),
+                            color: (active || isRegistered) ? Colors.white : const Color(0xFF64748B),
                           ),
                         ),
                       ],
                     )
                   : Row(
                       children: [
-                        // 3D AI Logo Container
+                        // Logo Container
                         Container(
                           width: 72,
                           height: 72,
@@ -430,30 +662,52 @@ class _CategoryCardState extends State<_CategoryCard> {
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(
-                              color: cat.accentColor.withValues(alpha: 0.15),
+                              color: isRegistered
+                                  ? const Color(0xFF059669).withOpacity(0.3)
+                                  : cat.accentColor.withValues(alpha: 0.15),
                               width: 1.2,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: cat.accentColor.withValues(alpha: 0.10),
+                                color: isRegistered
+                                    ? const Color(0xFF059669).withOpacity(0.12)
+                                    : cat.accentColor.withValues(alpha: 0.10),
                                 blurRadius: 10,
                                 offset: const Offset(0, 3),
                               ),
                             ],
                           ),
                           clipBehavior: Clip.antiAlias,
-                          child: Image.asset(
-                            cat.imagePath,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Center(
-                                child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
-                              );
-                            },
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.asset(
+                                cat.imagePath,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Icon(LucideIcons.store, color: cat.accentColor, size: 30),
+                                  );
+                                },
+                              ),
+                              if (isRegistered)
+                                Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(3),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF059669),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(LucideIcons.check, color: Colors.white, size: 10),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 16),
-                        // Title & Minimal Subtitle
+                        // Title & Badge
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -463,41 +717,84 @@ class _CategoryCardState extends State<_CategoryCard> {
                                   Flexible(
                                     child: Text(
                                       cat.title,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 17.5,
                                         fontWeight: FontWeight.w800,
-                                        color: Color(0xFF0F172A),
+                                        color: isFull ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
                                         letterSpacing: -0.3,
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
-                                    decoration: BoxDecoration(
-                                      color: cat.accentColor.withValues(alpha: 0.09),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      cat.badgeText,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: cat.accentColor,
-                                        letterSpacing: 0.2,
+                                  if (isRegistered)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF059669).withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFF059669).withOpacity(0.35)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(LucideIcons.checkCircle2, size: 11, color: Color(0xFF059669)),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Registered',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF059669),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else if (isFull)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF94A3B8).withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        'Full',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2.5),
+                                      decoration: BoxDecoration(
+                                        color: cat.accentColor.withValues(alpha: 0.09),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        cat.badgeText,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: cat.accentColor,
+                                          letterSpacing: 0.2,
+                                        ),
                                       ),
                                     ),
-                                  ),
                                 ],
                               ),
                               const SizedBox(height: 6),
                               Text(
-                                cat.subtitle,
-                                style: const TextStyle(
+                                isRegistered && widget.registeredStoreName != null
+                                    ? 'Active Store: ${widget.registeredStoreName} • Tap to open'
+                                    : cat.subtitle,
+                                style: TextStyle(
                                   fontSize: 12.8,
-                                  color: Color(0xFF64748B),
+                                  color: isRegistered ? const Color(0xFF059669) : const Color(0xFF64748B),
                                   height: 1.4,
-                                  fontWeight: FontWeight.w400,
+                                  fontWeight: isRegistered ? FontWeight.w600 : FontWeight.w400,
                                 ),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
@@ -512,13 +809,19 @@ class _CategoryCardState extends State<_CategoryCard> {
                           width: 36,
                           height: 36,
                           decoration: BoxDecoration(
-                            color: active ? cat.accentColor : const Color(0xFFF1F5F9),
+                            color: isRegistered
+                                ? const Color(0xFF059669)
+                                : active
+                                    ? cat.accentColor
+                                    : const Color(0xFFF1F5F9),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            LucideIcons.chevronRight,
+                            isRegistered
+                                ? LucideIcons.layoutDashboard
+                                : LucideIcons.chevronRight,
                             size: 18,
-                            color: active ? Colors.white : const Color(0xFF64748B),
+                            color: (active || isRegistered) ? Colors.white : const Color(0xFF64748B),
                           ),
                         ),
                       ],

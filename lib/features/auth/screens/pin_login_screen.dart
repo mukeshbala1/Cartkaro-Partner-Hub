@@ -108,6 +108,13 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   }
 
   Future<void> _initBiometric() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final isSet = await AuthService.isPinSet();
+      if (!isSet) {
+        await AuthService.syncFromCloud(user.uid);
+      }
+    }
     final info = await AuthService.getDeviceBiometricInfo();
     if (mounted) {
       setState(() {
@@ -581,64 +588,71 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                       fit: BoxFit.scaleDown,
                       child: Column(
                         children: [
-                        for (final row in [
-                          [
-                            {'d': '1', 'sub': ''},
-                            {'d': '2', 'sub': 'ABC'},
-                            {'d': '3', 'sub': 'DEF'},
-                          ],
-                          [
-                            {'d': '4', 'sub': 'GHI'},
-                            {'d': '5', 'sub': 'JKL'},
-                            {'d': '6', 'sub': 'MNO'},
-                          ],
-                          [
-                            {'d': '7', 'sub': 'PQRS'},
-                            {'d': '8', 'sub': 'TUV'},
-                            {'d': '9', 'sub': 'WXYZ'},
-                          ],
-                          [
-                            {'d': '', 'sub': ''},
-                            {'d': '0', 'sub': '+'},
-                            {'d': '⌫', 'sub': ''},
-                          ],
-                        ])
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: row.map((k) {
-                                return _buildNumpadKey(
-                                  digit: k['d']!,
-                                  sub: k['sub']!,
-                                );
-                              }).toList(),
+                          for (final row in [
+                            ['1', '2', '3'],
+                            ['4', '5', '6'],
+                            ['7', '8', '9'],
+                            ['', '0', '⌫'],
+                          ])
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildNumpadKey(row[0]),
+                                  const SizedBox(width: 18),
+                                  _buildNumpadKey(row[1]),
+                                  const SizedBox(width: 18),
+                                  _buildNumpadKey(row[2]),
+                                ],
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
             ),
 
             // ── Minimal Footer (High Contrast) ────────────────
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
-              child: TextButton.icon(
-                onPressed: () async {
-                  final router = GoRouter.of(context);
-                  await FirebaseAuth.instance.signOut();
-                  await AuthService.clearPin();
-                  if (mounted) router.go('/login');
-                },
-                icon: const Icon(LucideIcons.logOut, size: 15, color: Color(0xFF0F172A)),
-                label: const Text(
-                  'Switch Account',
-                  style: TextStyle(
-                    color: Color(0xFF0F172A),
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13.5,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton(
+                    onPressed: () => context.push('/reset-pin'),
+                    child: const Text(
+                      'Forgot PIN?',
+                      style: TextStyle(
+                        color: AppColors.kPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
                   ),
-                ),
+                  Container(
+                    height: 14,
+                    width: 1.2,
+                    color: const Color(0xFFCBD5E1),
+                    margin: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final router = GoRouter.of(context);
+                      await FirebaseAuth.instance.signOut();
+                      await AuthService.clearPin();
+                      if (mounted) router.go('/login');
+                    },
+                    icon: const Icon(LucideIcons.logOut, size: 15, color: Color(0xFF0F172A)),
+                    label: const Text(
+                      'Switch Account',
+                      style: TextStyle(
+                        color: Color(0xFF0F172A),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -650,10 +664,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
     ));
   }
 
-  Widget _buildNumpadKey({
-    required String digit,
-    required String sub,
-  }) {
+  Widget _buildNumpadKey(String digit) {
     // ── Blank Corner Spacer ───────────────────────────────────
     if (digit.isEmpty) {
       return const SizedBox(width: 76, height: 64);
@@ -697,29 +708,13 @@ class _PinLoginScreenState extends State<PinLoginScreen>
           border: Border.all(color: const Color(0xFFCBD5E1), width: 1.2),
         ),
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                digit,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF0F172A),
-                  height: 1.1,
-                ),
-              ),
-              if (sub.isNotEmpty)
-                Text(
-                  sub,
-                  style: const TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF334155),
-                    letterSpacing: 1.2,
-                  ),
-                ),
-            ],
+          child: Text(
+            digit,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF0F172A),
+            ),
           ),
         ),
       ),

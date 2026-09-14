@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/utils/responsive.dart';
 import '../../../core/services/auth_service.dart';
@@ -28,15 +30,150 @@ class DashboardLayout extends StatefulWidget {
 class _DashboardLayoutState extends State<DashboardLayout> {
   int _selectedIndex = 0;
   
-  late String _currentBusinessType;
+  String _currentBusinessType = 'restaurant';
+  String _businessStatus = 'pending';
+  String? _resolvedBusinessId;
+  bool _isResolvingBusiness = true;
   List<Map<String, dynamic>> _itemsList = [];
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _statusSubscription;
 
   int get activeItemsCount => _itemsList.where((item) => item['isActive'] == true).length;
 
   @override
   void initState() {
     super.initState();
-    _currentBusinessType = 'grocery'; // Default, will be updated by DashboardScreen
+    _resolveBusiness();
+  }
+
+  @override
+  void didUpdateWidget(covariant DashboardLayout oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId) {
+      _resolveBusiness();
+    }
+  }
+
+  @override
+  void dispose() {
+    _statusSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _listenToBusinessUpdates(String bId) {
+    _statusSubscription?.cancel();
+    _statusSubscription = FirebaseFirestore.instance
+        .collection('businesses')
+        .doc(bId)
+        .snapshots()
+        .listen(
+      (snap) {
+        if (!snap.exists || snap.data() == null || !mounted) return;
+        final data = snap.data()!;
+        final bType = data['businessType'] as String?;
+        final rawStatus = (data['status'] as String?)?.toLowerCase();
+
+        String parsedStatus = 'approved';
+        if (rawStatus == 'pending' ||
+            rawStatus == 'under_verification' ||
+            rawStatus == 'in_review' ||
+            rawStatus == 'verification_pending') {
+          parsedStatus = 'pending';
+        } else if (rawStatus == 'rejected') {
+          parsedStatus = 'rejected';
+        }
+
+        setState(() {
+          if (bType != null && bType.isNotEmpty) {
+            _currentBusinessType = bType;
+          }
+          _businessStatus = parsedStatus;
+        });
+      },
+      onError: (e) {
+        debugPrint('DashboardLayout status listener note: $e');
+      },
+    );
+  }
+
+  Future<void> _resolveBusiness() async {
+    final cachedStatus = await AuthService.getBusinessStatus();
+    if (cachedStatus != null && cachedStatus.isNotEmpty) {
+      _businessStatus = cachedStatus;
+    }
+
+    if (widget.businessId != null && widget.businessId!.isNotEmpty) {
+      _resolvedBusinessId = widget.businessId;
+      await AuthService.saveActiveBusinessId(_resolvedBusinessId!);
+      final cachedType = await AuthService.getBusinessType();
+      if (mounted) {
+        setState(() {
+          if (cachedType != null && cachedType.isNotEmpty) {
+            _currentBusinessType = cachedType;
+          }
+          _isResolvingBusiness = false;
+        });
+      }
+      _listenToBusinessUpdates(_resolvedBusinessId!);
+      return;
+    }
+
+    // 1. Try local cache
+    final cachedId = await AuthService.getActiveBusinessId();
+    if (cachedId != null && cachedId.isNotEmpty) {
+      _resolvedBusinessId = cachedId;
+      final cachedType = await AuthService.getBusinessType();
+      if (mounted) {
+        setState(() {
+          if (cachedType != null && cachedType.isNotEmpty) {
+            _currentBusinessType = cachedType;
+          }
+          _isResolvingBusiness = false;
+        });
+      }
+      _listenToBusinessUpdates(_resolvedBusinessId!);
+      return;
+    }
+
+    // 2. Query Firestore by current user
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: user.uid)
+            .limit(1)
+            .get(const GetOptions(source: Source.serverAndCache))
+            .timeout(const Duration(seconds: 4));
+
+        if (snap.docs.isNotEmpty) {
+          final doc = snap.docs.first;
+          _resolvedBusinessId = doc.id;
+          await AuthService.saveActiveBusinessId(_resolvedBusinessId!);
+          final data = doc.data();
+          final bType = data['businessType'] as String?;
+          final rawStatus = (data['status'] as String?)?.toLowerCase();
+          if (mounted) {
+            setState(() {
+              if (bType != null && bType.isNotEmpty) {
+                _currentBusinessType = bType;
+              }
+              if (rawStatus == 'pending' || rawStatus == 'under_verification') {
+                _businessStatus = 'pending';
+              }
+              _isResolvingBusiness = false;
+            });
+          }
+          _listenToBusinessUpdates(_resolvedBusinessId!);
+          return;
+        }
+      } catch (e) {
+        debugPrint('Error resolving business in layout: $e');
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isResolvingBusiness = false);
+    }
   }
 
   void _changeBusiness(String newType) {
@@ -119,39 +256,52 @@ class _DashboardLayoutState extends State<DashboardLayout> {
         const _NavItem(icon: LucideIcons.wallet, label: 'Earnings'),
       ];
 
-  List<Widget> get _pages => [
-        // Home Tab
-        DashboardScreen(
-          businessId: widget.businessId,
-          onBusinessChanged: _changeBusiness,
-          activeCount: activeItemsCount,
-          onAddProductTap: _addNewItem,
-          onViewProductsTap: () => setState(() => _selectedIndex = 1), 
-          onOrdersTap: _navigateToOrders, // Callbacks Pass Kiye
-          onRevenueTap: _navigateToEarnings, // Callbacks Pass Kiye
-        ),
-        // Products Tab
-        ProductsManagementScreen(
-          businessType: _currentBusinessType,
-          items: _itemsList,
-          onToggleStatus: _toggleItemStatus,
-          onDelete: _deleteItem,
-          onEdit: _editItem,
-          onAddNew: _addNewItem,
-        ),
-        // Orders Tab
-        OrdersManagementScreen(
-          businessType: _currentBusinessType,
-        ),
-        // Earnings Tab NAYA!
-        EarningsScreen(
-          businessType: _currentBusinessType,
-        ),
-      ];
+  List<Widget> get _pages {
+    final effectiveBusinessId = widget.businessId ?? _resolvedBusinessId;
+    return [
+      // Home Tab
+      DashboardScreen(
+        businessId: effectiveBusinessId,
+        onBusinessChanged: _changeBusiness,
+        activeCount: activeItemsCount,
+        onAddProductTap: _addNewItem,
+        onViewProductsTap: () => setState(() => _selectedIndex = 1), 
+        onOrdersTap: _navigateToOrders, // Callbacks Pass Kiye
+        onRevenueTap: _navigateToEarnings, // Callbacks Pass Kiye
+      ),
+      // Products Tab
+      ProductsManagementScreen(
+        businessType: _currentBusinessType,
+        items: _itemsList,
+        onToggleStatus: _toggleItemStatus,
+        onDelete: _deleteItem,
+        onEdit: _editItem,
+        onAddNew: _addNewItem,
+      ),
+      // Orders Tab
+      OrdersManagementScreen(
+        businessType: _currentBusinessType,
+      ),
+      // Earnings Tab NAYA!
+      EarningsScreen(
+        businessType: _currentBusinessType,
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.businessId == null || widget.businessId!.isEmpty) {
+    if (_isResolvingBusiness) {
+      return const Scaffold(
+        backgroundColor: AppColors.kBackground,
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.kPrimary),
+        ),
+      );
+    }
+
+    final effectiveBusinessId = widget.businessId ?? _resolvedBusinessId;
+    if (effectiveBusinessId == null || effectiveBusinessId.isEmpty) {
       return _buildNoBusinessView();
     }
 
@@ -266,12 +416,38 @@ class _DashboardLayoutState extends State<DashboardLayout> {
     );
   }
 
+  void _onTabSelected(int index) {
+    if (_businessStatus == 'pending' && index != 0) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(LucideIcons.lock, color: Colors.white, size: 18),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Account Under Verification • All features will unlock automatically once approved by admin.',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Color(0xFF152744),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+    setState(() => _selectedIndex = index);
+  }
+
   Widget _buildNavTab(int index) {
     final item = _navItems[index];
     final isActive = _selectedIndex == index;
 
     return GestureDetector(
-      onTap: () => setState(() => _selectedIndex = index),
+      onTap: () => _onTabSelected(index),
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
@@ -349,7 +525,7 @@ class _DashboardLayoutState extends State<DashboardLayout> {
                   icon: e.value.icon,
                   title: e.value.label,
                   isSelected: _selectedIndex == e.key,
-                  onTap: () => setState(() => _selectedIndex = e.key),
+                  onTap: () => _onTabSelected(e.key),
                 ),
               ),
         ],

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/auth_service.dart';
 
@@ -14,41 +13,51 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _animation;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 900),
       vsync: this,
     );
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+    _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
+    _scaleAnimation = Tween<double>(begin: 0.90, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
     
     _controller.forward();
     _checkLoginStatus();
   }
 
   Future<void> _checkLoginStatus() async {
-    final results = await Future.wait([
-      Future.delayed(const Duration(milliseconds: 600)),
-      AuthService.isPinSet(),
-    ]);
-    if (!mounted) return;
+    try {
+      final results = await Future.wait([
+        Future.delayed(const Duration(milliseconds: 2200)),
+        AuthService.isPinSet(),
+      ]);
+      if (!mounted) return;
 
-    final user = FirebaseAuth.instance.currentUser;
+      final user = FirebaseAuth.instance.currentUser;
 
-    // No Firebase session → go to login
-    if (user == null) {
+      // No Firebase session → go to login
+      if (user == null) {
+        context.go('/login');
+        return;
+      }
+
+      final pinSet = results[1] as bool? ?? false;
+      if (!pinSet) {
+        context.go('/pin-setup');
+      } else {
+        context.go('/pin-login');
+      }
+    } catch (e) {
+      debugPrint('Error during splash check: $e');
+      if (!mounted) return;
       context.go('/login');
-      return;
-    }
-
-    final pinSet = results[1] as bool? ?? false;
-    if (!pinSet) {
-      context.go('/pin-setup');
-    } else {
-      context.go('/pin-login');
     }
   }
 
@@ -64,8 +73,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       backgroundColor: AppColors.kBackground,
       body: Center(
         child: FadeTransition(
-          opacity: _animation,
-          child: Column(
+          opacity: _fadeAnimation,
+          child: ScaleTransition(
+            scale: _scaleAnimation,
+            child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               ClipRRect(
@@ -104,6 +115,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 ),
               ),
             ],
+          ),
           ),
         ),
       ),

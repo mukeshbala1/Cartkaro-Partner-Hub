@@ -11,22 +11,20 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../../core/constants/app_colors.dart';
-import '../widgets/mapbox_location_picker.dart';
 import '../widgets/web_wizard_layout.dart';
-import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../dashboard/screens/dashboard_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/services/mapbox_service.dart';
+import '../widgets/mapbox_location_picker.dart';
 import '../../../core/utils/safe_image_provider.dart';
 import '../../../core/services/auth_service.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 // ─────────────────────────────────────────
 // THEME CONSTANTS (Green removed, unified Blue theme)
@@ -74,6 +72,7 @@ class _GroceryRegistrationScreenState
       List.generate(9, (_) => GlobalKey<FormState>());
       
   String? _savedBusinessId;
+  bool _isSubmitting = false;
 
   // ── Step 1 ──
   final _ownerNameCtrl   = TextEditingController();
@@ -87,6 +86,7 @@ class _GroceryRegistrationScreenState
   // ── Step 2 ──
   final _storeNameCtrl    = TextEditingController();
   final _storeAddressCtrl = TextEditingController();
+  final _areaCtrl         = TextEditingController();
   final _cityCtrl         = TextEditingController();
   final _stateCtrl        = TextEditingController();
   final _pincodeCtrl      = TextEditingController();
@@ -159,6 +159,7 @@ class _GroceryRegistrationScreenState
         'altCountryCode': _altCountryCode,
         'storeName': _storeNameCtrl.text,
         'storeAddress': _storeAddressCtrl.text,
+        'area': _areaCtrl.text,
         'city': _cityCtrl.text,
         'state': _stateCtrl.text,
         'pincode': _pincodeCtrl.text,
@@ -215,6 +216,7 @@ class _GroceryRegistrationScreenState
           _altCountryCode = data['altCountryCode'] ?? '+91';
           _storeNameCtrl.text = data['storeName'] ?? '';
           _storeAddressCtrl.text = data['storeAddress'] ?? '';
+          _areaCtrl.text = data['area'] ?? '';
           _cityCtrl.text = data['city'] ?? '';
           _stateCtrl.text = data['state'] ?? '';
           _pincodeCtrl.text = data['pincode'] ?? '';
@@ -276,7 +278,7 @@ class _GroceryRegistrationScreenState
     _pageController.dispose();
     for (final c in [
       _ownerNameCtrl, _emailCtrl, _passwordCtrl, _confirmPassCtrl,
-      _altMobileCtrl, _storeNameCtrl, _storeAddressCtrl, _cityCtrl,
+      _altMobileCtrl, _storeNameCtrl, _storeAddressCtrl, _areaCtrl, _cityCtrl,
       _stateCtrl, _pincodeCtrl, _latCtrl, _lngCtrl, _fssaiNumberCtrl,
       _gstNumberCtrl, _tradeLicenseCtrl, _panCtrl, _aadhaarCtrl,
       _accountHolderCtrl, _accountNumberCtrl, _confirmAccountCtrl,
@@ -528,6 +530,7 @@ class _GroceryRegistrationScreenState
 
         _storeAddressCtrl.text = parts.join(', ');
         
+        if (area.isNotEmpty) _areaCtrl.text = area;
         if (city.isNotEmpty) _cityCtrl.text = city;
         if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
         if (pin.isNotEmpty) _pincodeCtrl.text = pin;
@@ -552,6 +555,55 @@ class _GroceryRegistrationScreenState
         setState(() => _isFetchingLocation = false);
       }
     }
+  }
+
+  void _applyGeocodedLocation(Map<String, String> geo) {
+    if (!mounted) return;
+    setState(() {
+      String addr = geo['address'] ?? '';
+      String area = geo['area'] ?? '';
+      String city = geo['city'] ?? '';
+      String stateRaw = geo['state'] ?? '';
+      String pin = geo['pincode'] ?? '';
+
+      String matchedState = '';
+      if (stateRaw.isNotEmpty) {
+        matchedState = _indianStates.firstWhere(
+          (s) => s.toLowerCase() == stateRaw.toLowerCase(),
+          orElse: () => _indianStates.firstWhere(
+            (s) => s.toLowerCase().contains(stateRaw.toLowerCase()) || stateRaw.toLowerCase().contains(s.toLowerCase()),
+            orElse: () => '',
+          ),
+        );
+      }
+
+      List<String> parts = [];
+      if (addr.isNotEmpty) parts.add(addr);
+      if (area.isNotEmpty && !addr.toLowerCase().contains(area.toLowerCase())) parts.add(area);
+      if (city.isNotEmpty && !addr.toLowerCase().contains(city.toLowerCase())) parts.add(city);
+      if (matchedState.isNotEmpty && !addr.toLowerCase().contains(matchedState.toLowerCase())) parts.add(matchedState);
+      if (pin.isNotEmpty && !addr.toLowerCase().contains(pin.toLowerCase())) parts.add(pin);
+
+      if (parts.isNotEmpty) {
+        _storeAddressCtrl.text = parts.join(', ');
+      } else if (addr.isNotEmpty) {
+        _storeAddressCtrl.text = addr;
+      }
+
+      area = area.trim();
+      if (area.isEmpty) {
+        if (addr.isNotEmpty) {
+          area = addr.split(',').first.trim();
+        } else if (city.isNotEmpty) {
+          area = city;
+        }
+      }
+
+      if (area.isNotEmpty) _areaCtrl.text = area;
+      if (city.isNotEmpty) _cityCtrl.text = city;
+      if (matchedState.isNotEmpty) _stateCtrl.text = matchedState;
+      if (pin.isNotEmpty) _pincodeCtrl.text = pin;
+    });
   }
 
   Future<void> _pickImage(
@@ -640,35 +692,36 @@ class _GroceryRegistrationScreenState
       return;
     }
 
-    // Step 0 Profile Photo is no longer mandatory
-  
-      // Step 2 GPS Location Mandatory
-  if (_currentStep == 1 &&
-      (_latCtrl.text.isEmpty || _lngCtrl.text.isEmpty)) {
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          "Please use current location first",
-        ),
-        backgroundColor: kErrorColor,
-      ),
-    );
-
-    return;
-  }
-
-  if (_currentStep == 1 && _storePhotos.isEmpty) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(
-        "Please upload at least one store photo",
-      ),
-      backgroundColor: kErrorColor,
-    ),
-  );
-  return;
-}
+    // Step 1 (Step 2 in UI - Store Details): Logo, Banner, and Photos are Mandatory
+    if (_currentStep == 1) {
+      if (_storeLogoPath.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload your Store Logo"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+      if (_storeBannerPath.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload your Store Banner"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+      if (_storePhotos.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload at least one Store Photo"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
 
     if (_currentStep == 7 && !_agreementAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -683,78 +736,208 @@ class _GroceryRegistrationScreenState
       final nextPage = _currentStep + 1;
 
       if (nextPage == 8) {
-        // Save to Firestore
+        if (_isSubmitting) return;
+        setState(() => _isSubmitting = true);
+
         try {
-          final user = FirebaseAuth.instance.currentUser;
-          if (user != null) {
-            final docRef = FirebaseFirestore.instance.collection('businesses').doc();
-            await docRef.set({
-              'userId': user.uid,
-              'ownerUid': user.uid,
-              'businessType': 'grocery',
-              'status': 'pending',
-              'isLive': false,
-              'createdAt': FieldValue.serverTimestamp(),
-              'mobile': user.phoneNumber,
-              'ownerName': _ownerNameCtrl.text,
-              'email': _emailCtrl.text,
-              'altMobile': _altMobileCtrl.text,
-              'altCountryCode': _altCountryCode,
-              'profilePhotoPath': _profilePhotoPath,
-              'storeName': _storeNameCtrl.text,
-              'storeAddress': _storeAddressCtrl.text,
-              'city': _cityCtrl.text,
-              'state': _stateCtrl.text,
-              'pincode': _pincodeCtrl.text,
-              'lat': _latCtrl.text,
-              'lng': _lngCtrl.text,
-              'storeLogoPath': _storeLogoPath,
-              'storeBannerPath': _storeBannerPath,
-              'storePhotos': _storePhotos,
-              'categories': _selectedCategories.toList(),
-              'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
-              'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
-              'workingDays': _workingDays.toList(),
-              'acceptOnlineOrders': _acceptOnlineOrders,
-              'fssaiNumber': _fssaiNumberCtrl.text,
-              'gstNumber': _gstNumberCtrl.text,
-              'tradeLicense': _tradeLicenseCtrl.text,
-              'pan': _panCtrl.text,
-              'aadhaar': _aadhaarCtrl.text,
-              'fssaiCertPath': _fssaiCertPath,
-              'gstCertPath': _gstCertPath,
-              'tradeLicensePath': _tradeLicensePath,
-              'panDocPath': _panDocPath,
-              'aadhaarDocPath': _aadhaarDocPath,
-              'accountHolder': _accountHolderCtrl.text,
-              'accountNumber': _accountNumberCtrl.text,
-              'ifsc': _ifscCtrl.text,
-              'upi': _upiCtrl.text,
-              'bank': _selectedBank,
-              'cancelledChequePath': _cancelledChequePath,
-              'deliveryOption': _deliveryOption,
-              'minOrder': _minOrderCtrl.text,
-              'estDelivery': _estDeliveryCtrl.text,
-            });
-            _savedBusinessId = docRef.id;
-            await AuthService.saveActiveBusinessId(_savedBusinessId!);
-            await AuthService.saveOwnerName(_ownerNameCtrl.text);
-            await AuthService.saveBusinessType('grocery');
-            
-            // Delete draft on successful registration
-            await FirebaseFirestore.instance.collection('registration_drafts').doc('${user.uid}_grocery').delete();
-            
-            if (mounted) {
-              context.go('/dashboard', extra: _savedBusinessId);
+          User? user = FirebaseAuth.instance.currentUser;
+          if (user == null) {
+            try {
+              final userCred = await FirebaseAuth.instance
+                  .signInAnonymously()
+                  .timeout(const Duration(seconds: 4));
+              user = userCred.user;
+            } catch (e) {
+              debugPrint('Auth fallback note: $e');
             }
-            return;
           }
+
+          final effectiveUid = user?.uid ?? (await AuthService.getActiveBusinessId()) ?? DateTime.now().millisecondsSinceEpoch.toString();
+          final effectiveMobile = (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
+              ? user.phoneNumber!
+              : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
+                  ? widget.prefilledMobile!
+                  : _altMobileCtrl.text.trim();
+
+          // Rule: 1 Number/Account -> Max 3 Businesses (1 Grocery, 1 Restaurant, 1 Medical)
+          if (effectiveUid.isNotEmpty) {
+            try {
+              final existingSnap = await FirebaseFirestore.instance
+                  .collection('businesses')
+                  .where('ownerUid', isEqualTo: effectiveUid)
+                  .get()
+                  .timeout(const Duration(seconds: 4));
+
+              // 1. Check if user already registered a grocery store under this account
+              final existingGrocery = existingSnap.docs.where((d) {
+                final t = (d.data()['businessType'] as String?)?.toLowerCase();
+                return t == 'grocery';
+              }).toList();
+
+              if (existingGrocery.isNotEmpty) {
+                final existingId = existingGrocery.first.id;
+                await AuthService.saveActiveBusinessId(existingId);
+                await AuthService.saveBusinessType('grocery');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('You have already registered a Grocery Store under this account. Opening dashboard...'),
+                      backgroundColor: Color(0xFF059669),
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                  context.go('/dashboard', extra: existingId);
+                }
+                return;
+              }
+
+              // 2. Check if user already reached 3 business capacity
+              if (existingSnap.docs.length >= 3) {
+                if (mounted) {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      title: const Row(
+                        children: [
+                          Icon(LucideIcons.shieldAlert, color: Color(0xFFEA580C)),
+                          SizedBox(width: 10),
+                          Text("Business Limit Reached"),
+                        ],
+                      ),
+                      content: const Text(
+                        "One mobile number can register up to 3 businesses (1 Grocery, 1 Restaurant, and 1 Medical).\n\nYour account has already registered 3 businesses.",
+                        style: TextStyle(fontSize: 14, height: 1.5),
+                      ),
+                      actions: [
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            context.go('/business-selector');
+                          },
+                          child: const Text("View My Businesses"),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                return;
+              }
+            } catch (checkErr) {
+              debugPrint('Existing business check note: $checkErr');
+            }
+          }
+
+          final docRef = FirebaseFirestore.instance.collection('businesses').doc();
+          final businessId = docRef.id;
+          _savedBusinessId = businessId;
+
+          // Save local session state immediately so partner is never orphaned
+          final storeName = _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store';
+          await AuthService.saveActiveBusinessId(businessId);
+          await AuthService.saveOwnerName(_ownerNameCtrl.text.trim());
+          await AuthService.saveBusinessType('grocery');
+          await AuthService.saveStoreName(storeName);
+          await AuthService.saveBusinessStatus('pending');
+
+          final businessData = {
+            'userId': effectiveUid,
+            'ownerUid': effectiveUid,
+            'businessType': 'grocery',
+            'status': 'pending',
+            'isLive': false,
+            'createdAt': FieldValue.serverTimestamp(),
+            'name': _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store',
+            'storeName': _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store',
+            'address': _storeAddressCtrl.text.trim(),
+            'storeAddress': _storeAddressCtrl.text.trim(),
+            'mobile': effectiveMobile,
+            'phoneNumber': effectiveMobile,
+            'ownerName': _ownerNameCtrl.text.trim(),
+            'email': _emailCtrl.text.trim(),
+            'altMobile': _altMobileCtrl.text.trim(),
+            'altCountryCode': _altCountryCode,
+            'profilePhotoPath': _profilePhotoPath,
+            'area': _areaCtrl.text.trim(),
+            'city': _cityCtrl.text.trim(),
+            'state': _stateCtrl.text.trim(),
+            'pincode': _pincodeCtrl.text.trim(),
+            'lat': _latCtrl.text.trim(),
+            'lng': _lngCtrl.text.trim(),
+            'logoUrl': _storeLogoPath,
+            'storeLogoPath': _storeLogoPath,
+            'bannerUrl': _storeBannerPath,
+            'storeBannerPath': _storeBannerPath,
+            'storePhotos': _storePhotos,
+            'categories': _selectedCategories.toList(),
+            'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
+            'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
+            'workingDays': _workingDays.toList(),
+            'acceptOnlineOrders': _acceptOnlineOrders,
+            'fssaiNumber': _fssaiNumberCtrl.text.trim(),
+            'gstNumber': _gstNumberCtrl.text.trim(),
+            'tradeLicense': _tradeLicenseCtrl.text.trim(),
+            'pan': _panCtrl.text.trim(),
+            'aadhaar': _aadhaarCtrl.text.trim(),
+            'fssaiCertPath': _fssaiCertPath,
+            'gstCertPath': _gstCertPath,
+            'tradeLicensePath': _tradeLicensePath,
+            'panDocPath': _panDocPath,
+            'aadhaarDocPath': _aadhaarDocPath,
+            'accountHolder': _accountHolderCtrl.text.trim(),
+            'accountNumber': _accountNumberCtrl.text.trim(),
+            'ifsc': _ifscCtrl.text.trim(),
+            'upi': _upiCtrl.text.trim(),
+            'bank': _selectedBank,
+            'cancelledChequePath': _cancelledChequePath,
+            'deliveryOption': _deliveryOption,
+            'minOrder': _minOrderCtrl.text.trim(),
+            'estDelivery': _estDeliveryCtrl.text.trim(),
+          };
+
+          // Save to Firestore with timeout and background local cache fallback
+          try {
+            await docRef.set(businessData, SetOptions(merge: true)).timeout(const Duration(seconds: 7));
+          } catch (fsError) {
+            debugPrint('Firestore server sync delayed, cached locally: $fsError');
+            docRef.set(businessData, SetOptions(merge: true)).catchError((e) {
+              debugPrint('Background sync error: $e');
+            });
+          }
+
+          // Delete draft non-fatally
+          try {
+            if (user != null) {
+              await FirebaseFirestore.instance
+                  .collection('registration_drafts')
+                  .doc('${user.uid}_grocery')
+                  .delete()
+                  .timeout(const Duration(seconds: 3));
+            }
+          } catch (e) {
+            debugPrint('Draft delete non-fatal note: $e');
+          }
+
+          if (mounted) {
+            context.go('/dashboard', extra: businessId);
+          }
+          return;
         } catch (e) {
           debugPrint('Failed to save to Firestore: $e');
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to save data. Please check internet connection.")),
-          );
-          return; // Don't proceed if save failed
+          if (_savedBusinessId != null && mounted) {
+            context.go('/dashboard', extra: _savedBusinessId);
+            return;
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Failed to save data. Please check internet connection.")),
+            );
+          }
+          return;
+        } finally {
+          if (mounted) {
+            setState(() => _isSubmitting = false);
+          }
         }
       }
 
@@ -1026,12 +1209,12 @@ class _GroceryRegistrationScreenState
                   flex: 3,
                   child: _FilledNavButton(
                     label: isLastContentStep
-                        ? 'Submit Registration'
+                        ? (_isSubmitting ? 'Submitting...' : 'Submit Registration')
                         : 'Continue',
                     icon: isLastContentStep
-                        ? Icons.check_circle_outline
+                        ? (_isSubmitting ? Icons.hourglass_top_rounded : Icons.check_circle_outline)
                         : Icons.arrow_forward_rounded,
-                    enabled: canProceed,
+                    enabled: canProceed && !_isSubmitting,
                     onTap: _nextStep,
                   ),
                 ),
@@ -1093,49 +1276,6 @@ class _GroceryRegistrationScreenState
           hint: 'Optional backup number',
         ),
         const SizedBox(height: 24),
-        _SectionLabel(label: 'Security'),
-        CustomTextField(
-          controller: _passwordCtrl,
-          label: 'Create 4 Digit PIN',
-          hint: 'Enter 4 digit PIN',
-          required: true,
-          prefixIcon: Icons.pin_outlined,
-          isPassword: true,
-          keyboardType: TextInputType.number,
-          maxLength: 4,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(4),
-          ],
-          validator: (value) {
-
-            if (value == null || value.isEmpty) return 'PIN is required';
-            if (value.length != 4) return 'PIN must be exactly 4 digits';
-            return null;
-          },
-        ),
-        const SizedBox(height: 16),
-        CustomTextField(
-          controller: _confirmPassCtrl,
-          label: 'Confirm PIN',
-          hint: 'Re-enter 4 digit PIN',
-          required: true,
-          prefixIcon: Icons.pin_outlined,
-          isPassword: true,
-          keyboardType: TextInputType.number,
-          maxLength: 4,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(4),
-          ],
-          validator: (value) {
-
-            if (value == null || value.isEmpty) return 'Confirm PIN required';
-            if (value != _passwordCtrl.text) return 'PIN does not match';
-            return null;
-          },
-        ),
-        const SizedBox(height: 8),
       ],
     );
   }
@@ -1159,15 +1299,21 @@ class _GroceryRegistrationScreenState
           prefixIcon: Icons.store_outlined,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'GPS Location & Auto-Address'),
-        _LocationPickerCard(
+        _SectionLabel(label: 'Store Location on Map & GPS'),
+        MapboxLocationPickerCard(
           latCtrl: _latCtrl,
           lngCtrl: _lngCtrl,
-          onFetchLocation: _fetchRealLocation,
-          isLoading: _isFetchingLocation,
+          businessType: 'grocery',
+          onLocationSelected: (lat, lng) {
+            setState(() {
+              _latCtrl.text = lat.toStringAsFixed(6);
+              _lngCtrl.text = lng.toStringAsFixed(6);
+            });
+          },
+          onAddressDetailsFetched: _applyGeocodedLocation,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'Store Address'),
+        _SectionLabel(label: 'Store Address Details (Auto-filled)'),
         CustomTextField(
           controller: _storeAddressCtrl,
           label: 'Full Store Address',
@@ -1175,6 +1321,14 @@ class _GroceryRegistrationScreenState
           required: true,
           prefixIcon: Icons.location_on_outlined,
           maxLines: 2,
+        ),
+        const SizedBox(height: 16),
+        CustomTextField(
+          controller: _areaCtrl,
+          label: 'Area / Locality',
+          hint: 'e.g. Koramangala',
+          required: true,
+          prefixIcon: Icons.map_outlined,
         ),
         const SizedBox(height: 16),
         Row(
@@ -1190,12 +1344,33 @@ class _GroceryRegistrationScreenState
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: CustomTextField(
-                controller: _stateCtrl,
-                label: 'State',
-                hint: 'State',
-                required: true,
-                prefixIcon: Icons.map_outlined,
+              child: DropdownButtonFormField<String>(
+                value: _stateCtrl.text.isNotEmpty && _indianStates.contains(_stateCtrl.text) ? _stateCtrl.text : null,
+                items: _indianStates.map((state) {
+                  return DropdownMenuItem(value: state, child: Text(state, overflow: TextOverflow.ellipsis));
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _stateCtrl.text = val);
+                  }
+                },
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'State',
+                  hintText: 'Select State',
+                  prefixIcon: const Icon(Icons.map_outlined, color: kNavyBlue),
+                  filled: true,
+                  fillColor: kWhite,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: kBorderColor),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: kBorderColor),
+                  ),
+                ),
+                validator: (val) => val == null || val.isEmpty ? 'Required' : null,
               ),
             ),
           ],
@@ -1210,17 +1385,19 @@ class _GroceryRegistrationScreenState
           keyboardType: TextInputType.number,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'Store Branding'),
+        _SectionLabel(label: 'Store Branding (Required) *'),
         _BannerLogoUploadRow(
           logoPath: _storeLogoPath,
           bannerPath: _storeBannerPath,
+          logoLabel: 'Store Logo *',
+          bannerLabel: 'Store Banner *',
           onLogoTap: () =>
               _pickImage(ImageSource.gallery, (path) => _storeLogoPath = path),
           onBannerTap: () => _pickImage(
               ImageSource.gallery, (path) => _storeBannerPath = path),
         ),
         const SizedBox(height: 16),
-        _SectionLabel(label: 'Store Photos'),
+        _SectionLabel(label: 'Store Photos (Required at least 1) *'),
         _MultiPhotoUpload(
           photos: _storePhotos,
           onAdd: () => _showImagePickerOptions(
@@ -2266,6 +2443,7 @@ class CustomTextField extends StatefulWidget {
   final String hint;
   final bool required;
   final IconData? prefixIcon;
+  final Widget? suffix;
   final TextInputType keyboardType;
   final bool isPassword;
   final bool obscureText;
@@ -2282,6 +2460,7 @@ class CustomTextField extends StatefulWidget {
     required this.hint,
     this.required = false,
     this.prefixIcon,
+    this.suffix,
     this.keyboardType = TextInputType.text,
     this.isPassword = false,
     this.obscureText = false,
@@ -2394,7 +2573,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
                         size: 20,
                       ),
                     )
-                  : null,
+                  : widget.suffix,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 12),
               border: OutlineInputBorder(
@@ -3179,6 +3358,8 @@ class _CountryCodeMobileField extends StatelessWidget {
 class _BannerLogoUploadRow extends StatelessWidget {
   final String logoPath;
   final String bannerPath;
+  final String logoLabel;
+  final String bannerLabel;
   final VoidCallback onLogoTap;
   final VoidCallback onBannerTap;
 
@@ -3187,6 +3368,8 @@ class _BannerLogoUploadRow extends StatelessWidget {
     required this.bannerPath,
     required this.onLogoTap,
     required this.onBannerTap,
+    this.logoLabel = 'Store Logo *',
+    this.bannerLabel = 'Store Banner *',
   });
 
   @override
@@ -3197,7 +3380,7 @@ class _BannerLogoUploadRow extends StatelessWidget {
           child: GestureDetector(
             onTap: onLogoTap,
             child: _UploadBox(
-              label: 'Store Logo',
+              label: logoLabel,
               icon: Icons.storefront_outlined,
               imagePath: logoPath,
               aspectRatio: 1,
@@ -3210,7 +3393,7 @@ class _BannerLogoUploadRow extends StatelessWidget {
           child: GestureDetector(
             onTap: onBannerTap,
             child: _UploadBox(
-              label: 'Store Banner',
+              label: bannerLabel,
               icon: Icons.panorama_outlined,
               imagePath: bannerPath,
               aspectRatio: 2,
@@ -3237,7 +3420,8 @@ class _UploadBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uploaded = imagePath.isNotEmpty;
+    final imageProvider = getSafeImageProvider(imagePath);
+    final uploaded = imagePath.trim().isNotEmpty && imageProvider != null;
     return SizedBox(
       height: 95,
       child: AspectRatio(
@@ -3252,9 +3436,9 @@ class _UploadBox extends StatelessWidget {
               style: BorderStyle.solid,
               width: uploaded ? 1.5 : 1,
             ),
-            image: (uploaded && getSafeImageProvider(imagePath) != null)
+            image: uploaded
                 ? DecorationImage(
-                    image: getSafeImageProvider(imagePath)!,
+                    image: imageProvider!,
                     fit: BoxFit.cover,
                   )
                 : null,
@@ -3306,7 +3490,7 @@ class _UploadBox extends StatelessWidget {
 class _MultiPhotoUpload extends StatelessWidget {
   final List<String> photos;
   final VoidCallback onAdd;
-  final ValueChanged<int> onRemove;
+  final Function(int) onRemove;
 
   const _MultiPhotoUpload({
     required this.photos,
@@ -3363,7 +3547,7 @@ class _MultiPhotoUpload extends StatelessWidget {
                 color: kBlueAccent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                    color: kNavyBlue.withOpacity(0.4)),
+                    color: kNavyBlue.withValues(alpha: 0.4)),
                 image: getSafeImageProvider(photos[i]) != null
                     ? DecorationImage(
                         image: getSafeImageProvider(photos[i])!,
@@ -3396,227 +3580,6 @@ class _MultiPhotoUpload extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _LocationPickerCard extends StatelessWidget {
-  final TextEditingController latCtrl;
-  final TextEditingController lngCtrl;
-  final VoidCallback onFetchLocation;
-  final bool isLoading;
-
-  const _LocationPickerCard({
-    required this.latCtrl,
-    required this.lngCtrl,
-    required this.onFetchLocation,
-    this.isLoading = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bool hasLocation =
-        latCtrl.text.isNotEmpty && lngCtrl.text.isNotEmpty;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kOffWhite,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: hasLocation ? kNavyBlue : kBorderColor,
-          width: hasLocation ? 1.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: kNavyBlue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.gps_fixed_rounded,
-                    color: kNavyBlue, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'GPS Location & Auto-Fill',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: kTextPrimary,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Detect GPS to auto-fill address, city & pincode',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: kTextSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: isLoading ? null : onFetchLocation,
-              icon: isLoading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        color: kWhite,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(Icons.my_location_rounded,
-                      size: 20, color: kWhite),
-              label: Text(
-                isLoading ? 'Detecting GPS Location...' : '📍 Fetch Current Location',
-                style: const TextStyle(
-                  color: kWhite,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14.5,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kNavyBlue,
-                disabledBackgroundColor: kNavyBlue.withValues(alpha: 0.7),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _CoordField(
-                  controller: latCtrl,
-                  label: 'Latitude',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _CoordField(
-                  controller: lngCtrl,
-                  label: 'Longitude',
-                ),
-              ),
-            ],
-          ),
-          if (hasLocation) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: kSuccessColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: kSuccessColor.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: const [
-                  Icon(Icons.check_circle_rounded,
-                      color: kSuccessColor, size: 18),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '✅ GPS Captured — Address, Area & Pincode Auto-Filled',
-                      style: TextStyle(
-                        color: kSuccessColor,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _CoordField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  const _CoordField(
-      {required this.controller, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: kTextSecondary,
-          ),
-        ),
-        const SizedBox(height: 6),
-        TextFormField(
-          controller: controller,
-          keyboardType:
-              const TextInputType.numberWithOptions(decimal: true),
-          style:
-              const TextStyle(fontSize: 13, color: kTextPrimary),
-          readOnly: true,
-          decoration: InputDecoration(
-            hintText: '0.0000',
-            hintStyle:
-                const TextStyle(color: kTextHint, fontSize: 13),
-            filled: true,
-            fillColor: const Color(0xFFF3F5F9),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 12),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide:
-                  const BorderSide(color: kBorderColor),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide:
-                  const BorderSide(color: kBorderColor),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide:
-                  const BorderSide(color: kNavyBlue),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

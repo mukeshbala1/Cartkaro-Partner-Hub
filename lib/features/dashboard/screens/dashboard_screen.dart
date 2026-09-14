@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -10,7 +12,6 @@ import '../../../core/services/auth_service.dart';
 import 'create_offer_screen.dart';
 import 'business_settings_screen.dart';
 import 'customer_reviews_screen.dart'; 
-import '../../auth/screens/business_type_screen.dart' hide BusinessTypeScreen;
 import '../../../models/business_model.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -38,53 +39,192 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  late BusinessModel _business;
+  BusinessModel _business = BusinessModel.empty();
   bool _isLoading = true;
   bool _isTogglingLive = false;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _businessSubscription;
 
   @override
   void initState() {
     super.initState();
-    _fetchBusinessData();
+    _business = BusinessModel.empty();
+    _initRealtimeBusiness();
   }
 
-  Future<void> _fetchBusinessData() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null && widget.businessId != null) {
-      try {
-        final doc = await FirebaseFirestore.instance.collection('businesses').doc(widget.businessId).get();
-        if (doc.exists) {
-          final data = doc.data()!;
-          if (!mounted) return;
-          
-          setState(() {
-            _business = BusinessModel.fromFirestore(data, doc.id);
-            _isLoading = false;
-          });
-          if (widget.businessId != null) {
-            await AuthService.saveActiveBusinessId(widget.businessId!);
+  @override
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId) {
+      _initRealtimeBusiness();
+    }
+  }
+
+  @override
+  void dispose() {
+    _businessSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initRealtimeBusiness() async {
+    String? bId = widget.businessId;
+    if (bId == null || bId.isEmpty) {
+      bId = await AuthService.getActiveBusinessId();
+    }
+
+    if (bId == null || bId.isEmpty) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('businesses')
+              .where('ownerUid', isEqualTo: user.uid)
+              .limit(1)
+              .get(const GetOptions(source: Source.serverAndCache))
+              .timeout(const Duration(seconds: 3));
+
+          if (snap.docs.isNotEmpty) {
+            bId = snap.docs.first.id;
           }
-          if (_business.ownerName.isNotEmpty) {
-            await AuthService.saveOwnerName(_business.ownerName);
-          }
-          if (_business.businessType.isNotEmpty) {
-            await AuthService.saveBusinessType(_business.businessType);
-          }
-          widget.onBusinessChanged(_business.businessType);
-          return;
+        } catch (e) {
+          debugPrint('Error finding business for user: $e');
         }
-      } catch (e) {
-        debugPrint('Error fetching business data: $e');
       }
     }
-    
-    // Fallback to mock if fetch fails or user is null
-    if (!mounted) return;
-    setState(() {
-      _business = BusinessModel.empty();
-      _isLoading = false;
-    });
-    widget.onBusinessChanged(_business.businessType);
+
+    // Read local cache immediately to ensure instantaneous correct business type, name, & pending status
+    final cachedType = await AuthService.getBusinessType();
+    final cachedName = await AuthService.getStoreName();
+    final cachedOwner = await AuthService.getOwnerName();
+    final cachedStatus = await AuthService.getBusinessStatus();
+
+    BusinessType resolvedType = BusinessType.restaurant;
+    if (cachedType == 'grocery') resolvedType = BusinessType.grocery;
+    if (cachedType == 'medical') resolvedType = BusinessType.medical;
+
+    BusinessStatus resolvedStatus = BusinessStatus.pending;
+    if (cachedStatus == 'approved') resolvedStatus = BusinessStatus.approved;
+    if (cachedStatus == 'rejected') resolvedStatus = BusinessStatus.rejected;
+
+    if (mounted) {
+      setState(() {
+        _business = BusinessModel.empty(
+          id: bId ?? '',
+          name: (cachedName != null && cachedName.isNotEmpty)
+              ? cachedName
+              : (resolvedType == BusinessType.restaurant
+                  ? 'My Restaurant'
+                  : resolvedType == BusinessType.medical
+                      ? 'My Medical Store'
+                      : 'My Grocery Store'),
+          type: resolvedType,
+          status: resolvedStatus,
+          ownerName: cachedOwner,
+        );
+        _isLoading = false;
+      });
+      widget.onBusinessChanged(_business.businessType);
+    }
+
+    if (bId == null || bId.isEmpty) {
+      return;
+    }
+
+    // Ensure an authenticated user session for Firestore read permissions
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      try {
+        await FirebaseAuth.instance.signInAnonymously().timeout(const Duration(seconds: 4));
+      } catch (authErr) {
+        debugPrint('Auth fallback note in dashboard: $authErr');
+      }
+    }
+
+    // 1. Quick fetch from cache or server
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('businesses')
+          .doc(bId)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(const Duration(seconds: 4));
+
+      if (doc.exists && doc.data() != null && mounted) {
+        final parsed = BusinessModel.fromFirestore(doc.data()!, doc.id);
+        setState(() {
+          _business = parsed;
+          _isLoading = false;
+        });
+        widget.onBusinessChanged(_business.businessType);
+        if (_business.displayName.isNotEmpty) {
+          await AuthService.saveStoreName(_business.displayName);
+        }
+        if (_business.ownerName.isNotEmpty) {
+          await AuthService.saveOwnerName(_business.ownerName);
+        }
+        if (_business.businessType.isNotEmpty) {
+          await AuthService.saveBusinessType(_business.businessType);
+        }
+      } else if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint('Initial business doc read: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+
+    // 2. Setup REAL-TIME listener for live updates from Firebase
+    await _businessSubscription?.cancel();
+    _businessSubscription = FirebaseFirestore.instance
+        .collection('businesses')
+        .doc(bId)
+        .snapshots()
+        .listen(
+      (snapshot) async {
+        if (!snapshot.exists || snapshot.data() == null) {
+          if (mounted && _isLoading) setState(() => _isLoading = false);
+          return;
+        }
+        if (!mounted) return;
+        final updatedBusiness = BusinessModel.fromFirestore(snapshot.data()!, snapshot.id);
+        final wasPending = _business.status == BusinessStatus.pending;
+        final isNowApproved = updatedBusiness.status == BusinessStatus.approved;
+
+        setState(() {
+          _business = updatedBusiness;
+          _isLoading = false;
+        });
+        widget.onBusinessChanged(_business.businessType);
+        if (_business.displayName.isNotEmpty) {
+          await AuthService.saveStoreName(_business.displayName);
+        }
+        if (_business.ownerName.isNotEmpty) {
+          await AuthService.saveOwnerName(_business.ownerName);
+        }
+        if (_business.businessType.isNotEmpty) {
+          await AuthService.saveBusinessType(_business.businessType);
+        }
+        await AuthService.saveBusinessStatus(
+          updatedBusiness.status == BusinessStatus.approved ? 'approved' : updatedBusiness.status == BusinessStatus.rejected ? 'rejected' : 'pending',
+        );
+
+        if (wasPending && isNowApproved && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Color(0xFF059669),
+              duration: Duration(seconds: 4),
+              content: Text('🎉 Congratulations! Your account has been verified and approved by admin. Full access unlocked!'),
+            ),
+          );
+        }
+      },
+      onError: (err) {
+        debugPrint('Real-time Firestore stream error: $err');
+        if (mounted && _isLoading) {
+          setState(() => _isLoading = false);
+        }
+      },
+    );
   }
 
   String get itemName => _business.itemName;
@@ -106,28 +246,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   IconData get _businessIcon {
     switch (_business.businessType) {
-      case 'grocery': return LucideIcons.shoppingCart;
       case 'restaurant': return LucideIcons.utensilsCrossed;
       case 'medical': return LucideIcons.pill;
-      default: return LucideIcons.store;
+      case 'grocery': return LucideIcons.shoppingCart;
+      default: return LucideIcons.utensilsCrossed;
     }
   }
 
+  // Unified Navy Blue theme across the entire application (No Green)
   List<Color> get _businessGradient {
-    switch (_business.businessType) {
-      case 'grocery': return [const Color(0xFF16A34A), const Color(0xFF22C55E)]; // Green
-      case 'restaurant': return [const Color(0xFFEA580C), const Color(0xFFF97316)]; // Orange
-      case 'medical': return [const Color(0xFF0284C7), const Color(0xFF0EA5E9)]; // Light Blue
-      default: return [AppColors.kPrimary, AppColors.kPrimary.withOpacity(0.78)];
-    }
+    return const [Color(0xFF152744), Color(0xFF223554)];
   }
 
   String get _businessBadgeText {
     switch (_business.businessType) {
-      case 'grocery': return 'Grocery Partner';
       case 'restaurant': return 'Restaurant Partner';
       case 'medical': return 'Medical Partner';
-      default: return 'Partner';
+      case 'grocery': return 'Grocery Partner';
+      default: return 'Restaurant Partner';
     }
   }
 
@@ -145,9 +281,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     bool success = false;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null && widget.businessId != null) {
-        await FirebaseFirestore.instance.collection('businesses').doc(widget.businessId).update({
+      final targetId = (widget.businessId != null && widget.businessId!.isNotEmpty)
+          ? widget.businessId!
+          : _business.id;
+      if (targetId.isNotEmpty) {
+        await FirebaseFirestore.instance.collection('businesses').doc(targetId).update({
           'isLive': newValue,
         });
         success = true;
@@ -238,133 +376,399 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_isLoading) {
       return const Scaffold(
         backgroundColor: AppColors.kBackground,
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(child: CircularProgressIndicator(color: AppColors.kPrimary)),
       );
-    }
-    
-    if (_business.status == BusinessStatus.pending) {
-      return _buildPendingVerificationView();
     }
     
     if (_business.status == BusinessStatus.rejected) {
       return _buildRejectedView();
     }
+
+    final bool isLocked = _business.status == BusinessStatus.pending;
     
     return Scaffold(
       backgroundColor: AppColors.kBackground,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(context),
-              _buildRevenueHeroCard(context),
-              _buildSmallStatsRow(context),
-              const SizedBox(height: 24),
-              Responsive.isDesktop(context)
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(width: 20),
-                          Expanded(flex: 1, child: _buildQuickActionsCard(context)),
-                        ],
-                      ),
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Column(
-                        children: [
-                          _buildQuickActionsCard(context),
-                          const SizedBox(height: 16),
-                        ],
-                      ),
-                    ),
-            ],
+      body: Stack(
+        children: [
+          // 1. Dashboard View (Visible in background)
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: isLocked ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeader(context),
+                  _buildRevenueHeroCard(context),
+                  _buildSmallStatsRow(context),
+                  const SizedBox(height: 24),
+                  Responsive.isDesktop(context)
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(width: 20),
+                              Expanded(flex: 1, child: _buildQuickActionsCard(context)),
+                            ],
+                          ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Column(
+                            children: [
+                              _buildQuickActionsCard(context),
+                              const SizedBox(height: 16),
+                            ],
+                          ),
+                        ),
+                ],
+              ),
+            ),
           ),
-        ),
+
+          // 2. Glassmorphism Locked Overlay (Shows until admin verifies in Firestore)
+          if (isLocked)
+            Positioned.fill(
+              child: _buildGlassVerificationLockOverlay(context),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _buildPendingVerificationView() {
-    return Scaffold(
-      backgroundColor: AppColors.kBackground,
-      appBar: AppBar(
-        backgroundColor: AppColors.kBackground,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(LucideIcons.logOut, color: AppColors.kDarkText),
-            onPressed: () async {
-              final hasPin = await AuthService.isPinSet();
-              if (hasPin) {
-                if (mounted) context.go('/pin-login');
-              } else {
-                await FirebaseAuth.instance.signOut();
-                if (mounted) context.go('/login');
-              }
-            },
+  Widget _buildGlassVerificationLockOverlay(BuildContext context) {
+    return AbsorbPointer(
+      absorbing: false, // User can click dialog actions inside the glass card
+      child: Stack(
+        children: [
+          // Frosted Glass Blur over the background dashboard
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+              child: Container(
+                color: Colors.black.withOpacity(0.60),
+              ),
+            ),
           ),
-        ],
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8EEF5),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.kPrimary, width: 2.5),
-                ),
-                child: const Icon(Icons.hourglass_top_rounded, color: AppColors.kPrimary, size: 52),
-              ),
-              const SizedBox(height: 28),
-              const Text(
-                'Verification\nUnder Review',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.kDarkText,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  height: 1.3,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Your documents and details are currently being verified by our team. This usually takes 24-48 hours.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.kLightText, fontSize: 14, height: 1.55),
-              ),
-              const SizedBox(height: 36),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() => _isLoading = true);
-                    _fetchBusinessData();
-                  },
-                  icon: const Icon(LucideIcons.refreshCw, size: 18),
-                  label: const Text('Refresh Status', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.kPrimary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+
+          // Centered Frosted Glass Card
+          Center(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Colors.white.withOpacity(0.20),
+                          Colors.white.withOpacity(0.08),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.32),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.40),
+                          blurRadius: 32,
+                          offset: const Offset(0, 16),
+                        ),
+                      ],
+                    ),
+                    padding: const EdgeInsets.all(28),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Animated Glowing Lock / Hourglass
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFFF59E0B).withOpacity(0.20),
+                            border: Border.all(
+                              color: const Color(0xFFF59E0B).withOpacity(0.50),
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFF59E0B).withOpacity(0.28),
+                                blurRadius: 24,
+                                spreadRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              LucideIcons.lock,
+                              size: 38,
+                              color: Color(0xFFFBBF24),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Main Title
+                        const Text(
+                          'Account Under Verification',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Amber Status Pill
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(0xFFF59E0B).withOpacity(0.5),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFFBBF24),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Pending Admin Approval',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFFDE68A),
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Registered Business Info Glass Tile
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.24),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.12),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(
+                                      _businessIcon,
+                                      size: 20,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _business.displayName,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        Text(
+                                          _business.businessTypeLabel,
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.7),
+                                            fontSize: 12.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (_business.mobileNumber.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Divider(color: Colors.white.withOpacity(0.1), height: 1),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      LucideIcons.phone,
+                                      size: 14,
+                                      color: Colors.white.withOpacity(0.6),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Registered: ${_business.mobileNumber}',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.75),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+
+                        // Message
+                        Text(
+                          'Your business registration details and documents have been submitted to CartKaro Partner Hub.\n\nOur administrator team is currently verifying your details. This screen is locked and will automatically unlock in real-time as soon as admin approves your account.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.85),
+                            fontSize: 13,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Real-time Cloud Sync Pulse Tag
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF10B981),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Live Cloud Sync Active • Unlocks Automatically',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withOpacity(0.75),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+
+                        // Actions Row
+                        Row(
+                          children: [
+                            // Refresh button
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  _initRealtimeBusiness();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Checking latest verification status from cloud...'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                                label: const Text('Check Status'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.kPrimary,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 0,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            // Switch Business button
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _openBusinessSwitcher,
+                                icon: const Icon(LucideIcons.arrowLeftRight, size: 16),
+                                label: const Text('Switch Store'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: BorderSide(color: Colors.white.withOpacity(0.4)),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Logout TextButton
+                        TextButton(
+                          onPressed: () async {
+                            final hasPin = await AuthService.isPinSet();
+                            if (hasPin) {
+                              if (context.mounted) context.go('/pin-login');
+                            } else {
+                              await FirebaseAuth.instance.signOut();
+                              if (context.mounted) context.go('/login');
+                            }
+                          },
+                          child: Text(
+                            'Log Out / Exit',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.65),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -734,24 +1138,51 @@ class _SwitchBusinessSheet extends StatelessWidget {
           const SizedBox(height: 14),
           ...businesses.map((b) => _businessRow(b)),
           const SizedBox(height: 6),
-          GestureDetector(
-            onTap: onAddNew,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.kPrimary.withOpacity(0.35), width: 1.4),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(LucideIcons.plusCircle, size: 16, color: AppColors.kPrimary),
-                  const SizedBox(width: 8),
-                  const Text('Add New Business', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.kPrimary)),
-                ],
-              ),
-            ),
-          ),
+          businesses.length >= 3
+              ? Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    border: Border.all(color: const Color(0xFFCBD5E1), width: 1.2),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(LucideIcons.checkCircle2, size: 16, color: Color(0xFF64748B)),
+                      SizedBox(width: 8),
+                      Text(
+                        'All 3 Categories Registered (Max)',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : GestureDetector(
+                  onTap: onAddNew,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppColors.kPrimary.withOpacity(0.35), width: 1.4),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(LucideIcons.plusCircle, size: 16, color: AppColors.kPrimary),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Add Business (${3 - businesses.length} slot${3 - businesses.length > 1 ? 's' : ''} left)',
+                          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.kPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
         ],
       ),
     );
