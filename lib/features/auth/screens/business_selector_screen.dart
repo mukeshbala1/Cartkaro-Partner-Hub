@@ -113,7 +113,7 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
                                   itemCount: docs.length + 1,
                                   itemBuilder: (context, index) {
                                     if (index == docs.length) {
-                                      return _buildAddNewButton();
+                                      return _buildAddNewButton(docs.length);
                                     }
                                     
                                     final doc = docs[index];
@@ -140,7 +140,7 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
                                   separatorBuilder: (context, index) => const SizedBox(height: 16),
                                   itemBuilder: (context, index) {
                                     if (index == docs.length) {
-                                      return _buildAddNewButton();
+                                      return _buildAddNewButton(docs.length);
                                     }
                                     
                                     final doc = docs[index];
@@ -233,27 +233,49 @@ class _BusinessSelectorScreenState extends State<BusinessSelectorScreen> {
     );
   }
 
-  Widget _buildAddNewButton() {
+  Widget _buildAddNewButton(int currentCount) {
+    final bool isFull = currentCount >= 3;
+    final int remaining = 3 - currentCount;
+
     return GestureDetector(
-      onTap: () => context.go('/business-type'),
+      onTap: () {
+        if (isFull) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("All 3 business categories (Grocery, Restaurant & Medical) are registered for this account."),
+              backgroundColor: Color(0xFF0F172A),
+            ),
+          );
+        } else {
+          context.go('/business-type');
+        }
+      },
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: AppColors.kPrimary.withOpacity(0.05),
+          color: isFull ? const Color(0xFFF1F5F9) : AppColors.kPrimary.withOpacity(0.05),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.kPrimary.withOpacity(0.2), style: BorderStyle.solid),
+          border: Border.all(
+            color: isFull ? const Color(0xFFCBD5E1) : AppColors.kPrimary.withOpacity(0.25),
+            style: BorderStyle.solid,
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.plusCircle, color: AppColors.kPrimary),
+            Icon(
+              isFull ? LucideIcons.checkCircle2 : LucideIcons.plusCircle,
+              color: isFull ? const Color(0xFF64748B) : AppColors.kPrimary,
+            ),
             const SizedBox(width: 12),
-            const Text(
-              "Register New Business",
+            Text(
+              isFull
+                  ? "All 3 Business Categories Registered"
+                  : "Register New Business ($remaining slot${remaining > 1 ? 's' : ''} left)",
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.bold,
-                color: AppColors.kPrimary,
+                color: isFull ? const Color(0xFF64748B) : AppColors.kPrimary,
               ),
             ),
           ],

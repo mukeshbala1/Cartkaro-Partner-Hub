@@ -2496,7 +2496,7 @@ class BusinessSettingsScreen extends StatefulWidget {
 }
 
 class _BusinessSettingsScreenState extends State<BusinessSettingsScreen> {
-  late BusinessModel _active;
+  BusinessModel _active = BusinessModel.empty();
 
   @override
   void initState() {

@@ -158,21 +158,28 @@ class BusinessModel {
 
   String get displayName => name;
 
-  factory BusinessModel.empty() {
-    return const BusinessModel(
-      id: '',
-      name: 'Unknown Business',
-      type: BusinessType.grocery,
-      status: BusinessStatus.pending,
+  factory BusinessModel.empty({
+    String? id,
+    String? name,
+    BusinessType? type,
+    BusinessStatus? status,
+    String? ownerName,
+    String? mobileNumber,
+  }) {
+    return BusinessModel(
+      id: id ?? '',
+      name: name ?? 'My Restaurant',
+      type: type ?? BusinessType.restaurant,
+      status: status ?? BusinessStatus.pending,
       logoUrl: '',
       bannerUrl: '',
-      ownerName: 'Unknown',
-      mobileNumber: '',
+      ownerName: ownerName ?? 'Store Partner',
+      mobileNumber: mobileNumber ?? '',
       email: '',
-      address: '',
+      address: 'Address not set',
       latitude: 0.0,
       longitude: 0.0,
-      sellingCategories: [],
+      sellingCategories: const [],
       isLive: false,
       todayRevenue: 0.0,
       revenueGrowthPct: 0.0,
@@ -181,69 +188,124 @@ class BusinessModel {
       pendingOrders: 0,
       activeItemCount: 0,
       avgRating: 0.0,
-      bank: BankAccount(
-        bankName: 'Unknown',
+      bank: const BankAccount(
+        bankName: 'Bank Account',
         accountNumberMasked: '',
         ifsc: '',
         verified: false,
       ),
-      documents: [],
+      documents: const [],
     );
   }
 
   factory BusinessModel.fromFirestore(Map<String, dynamic> data, String id) {
     // Parse business type
-    final typeStr = data['businessType'] as String?;
+    final typeStr = (data['businessType'] as String?)?.toLowerCase();
     BusinessType type = BusinessType.grocery;
-    if (typeStr == 'restaurant') type = BusinessType.restaurant;
-    if (typeStr == 'medical') type = BusinessType.medical;
+    if (typeStr == 'restaurant' || typeStr == 'cafe') type = BusinessType.restaurant;
+    if (typeStr == 'medical' || typeStr == 'pharmacy') type = BusinessType.medical;
 
     // Parse status
-    final statusStr = data['status'] as String?;
+    final statusStr = (data['status'] as String?)?.toLowerCase();
     BusinessStatus status = BusinessStatus.approved;
-    if (statusStr == 'pending') status = BusinessStatus.pending;
-    if (statusStr == 'rejected') status = BusinessStatus.rejected;
+    if (statusStr == 'pending' ||
+        statusStr == 'under_verification' ||
+        statusStr == 'in_review' ||
+        statusStr == 'verification_pending') {
+      status = BusinessStatus.pending;
+    } else if (statusStr == 'rejected') {
+      status = BusinessStatus.rejected;
+    } else if (statusStr == 'approved' || statusStr == 'verified' || statusStr == 'active') {
+      status = BusinessStatus.approved;
+    }
 
-    // Parse documents (just an example based on saved fields)
+    // Parse documents
     List<BusinessDocument> docs = [];
-    if (data['fssaiNumber'] != null && data['fssaiNumber'].toString().isNotEmpty) {
-      docs.add(BusinessDocument(name: "FSSAI Certificate", number: data['fssaiNumber'], status: "verified"));
+    if (data['fssaiNumber'] != null && data['fssaiNumber'].toString().trim().isNotEmpty) {
+      docs.add(BusinessDocument(
+        name: "FSSAI Certificate",
+        number: data['fssaiNumber'].toString().trim(),
+        status: "verified",
+        filePath: data['fssaiCertPath'] as String?,
+      ));
     }
-    if (data['gstNumber'] != null && data['gstNumber'].toString().isNotEmpty) {
-      docs.add(BusinessDocument(name: "GST Certificate", number: data['gstNumber'], status: "verified"));
+    if (data['gstNumber'] != null && data['gstNumber'].toString().trim().isNotEmpty) {
+      docs.add(BusinessDocument(
+        name: "GST Certificate",
+        number: data['gstNumber'].toString().trim(),
+        status: "verified",
+        filePath: data['gstCertPath'] as String?,
+      ));
     }
-    if (data['pan'] != null && data['pan'].toString().isNotEmpty) {
-      docs.add(BusinessDocument(name: "PAN Card", number: data['pan'], status: "verified"));
+    if (data['pan'] != null && data['pan'].toString().trim().isNotEmpty) {
+      docs.add(BusinessDocument(
+        name: "PAN Card",
+        number: data['pan'].toString().trim(),
+        status: "verified",
+        filePath: data['panDocPath'] as String?,
+      ));
     }
+    if (data['drugLicense'] != null && data['drugLicense'].toString().trim().isNotEmpty) {
+      docs.add(BusinessDocument(
+        name: "Drug License",
+        number: data['drugLicense'].toString().trim(),
+        status: "verified",
+        filePath: data['drugLicenseCertPath'] as String?,
+      ));
+    }
+    if (data['pharmacistReg'] != null && data['pharmacistReg'].toString().trim().isNotEmpty) {
+      docs.add(BusinessDocument(
+        name: "Pharmacist Registration",
+        number: data['pharmacistReg'].toString().trim(),
+        status: "verified",
+        filePath: data['pharmacistCertPath'] as String?,
+      ));
+    }
+    if (data['tradeLicense'] != null && data['tradeLicense'].toString().trim().isNotEmpty) {
+      docs.add(BusinessDocument(
+        name: "Trade License",
+        number: data['tradeLicense'].toString().trim(),
+        status: "verified",
+        filePath: data['tradeLicensePath'] as String?,
+      ));
+    }
+
+    final realName = (data['name'] ?? data['storeName'] ?? data['restaurantName'] ?? data['medicalName'] ?? 'My Store').toString();
+    final realAddress = (data['address'] ?? data['restaurantAddress'] ?? data['storeAddress'] ?? data['medicalAddress'] ?? data['area'] ?? '').toString();
+    final realLogo = (data['logoUrl'] ?? data['restaurantLogoPath'] ?? data['storeLogoPath'] ?? data['medicalLogo'] ?? '').toString();
+    final realBanner = (data['bannerUrl'] ?? data['restaurantBannerPath'] ?? data['storeBannerPath'] ?? data['medicalBanner'] ?? '').toString();
+    final realMobile = (data['mobile'] ?? data['phoneNumber'] ?? data['altMobile'] ?? '').toString();
+    final realOwner = (data['ownerName'] ?? '').toString();
+    final realEmail = (data['email'] ?? '').toString();
 
     return BusinessModel(
       id: id,
-      name: data['storeName'] ?? data['restaurantName'] ?? data['medicalName'] ?? 'Unnamed Business',
+      name: realName.isNotEmpty ? realName : 'My Store',
       type: type,
       status: status,
-      logoUrl: data['logoUrl'] ?? '',
-      bannerUrl: data['bannerUrl'] ?? '',
-      ownerName: data['ownerName'] ?? 'Unknown',
-      mobileNumber: data['mobile'] ?? '',
-      email: data['email'] ?? '',
-      address: data['restaurantAddress'] ?? data['storeAddress'] ?? data['medicalAddress'] ?? 'No Address',
+      logoUrl: realLogo,
+      bannerUrl: realBanner,
+      ownerName: realOwner.isNotEmpty ? realOwner : 'Partner Owner',
+      mobileNumber: realMobile,
+      email: realEmail,
+      address: realAddress.isNotEmpty ? realAddress : 'No Address Provided',
       latitude: double.tryParse(data['lat']?.toString() ?? '0') ?? 0.0,
       longitude: double.tryParse(data['lng']?.toString() ?? '0') ?? 0.0,
       sellingCategories: (data['categories'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-      isLive: data['isLive'] ?? false,
-      todayRevenue: 0.0,
-      revenueGrowthPct: 0.0,
-      totalOrders: 0,
-      completedOrders: 0,
-      pendingOrders: 0,
-      activeItemCount: 0,
-      avgRating: 0.0,
+      isLive: data['isLive'] == true,
+      todayRevenue: double.tryParse(data['todayRevenue']?.toString() ?? '0') ?? 0.0,
+      revenueGrowthPct: double.tryParse(data['revenueGrowthPct']?.toString() ?? '0') ?? 0.0,
+      totalOrders: int.tryParse(data['totalOrders']?.toString() ?? '0') ?? 0,
+      completedOrders: int.tryParse(data['completedOrders']?.toString() ?? '0') ?? 0,
+      pendingOrders: int.tryParse(data['pendingOrders']?.toString() ?? '0') ?? 0,
+      activeItemCount: int.tryParse(data['activeItemCount']?.toString() ?? '0') ?? 0,
+      avgRating: double.tryParse(data['avgRating']?.toString() ?? '0') ?? 0.0,
       bank: BankAccount(
-        bankName: data['bank'] ?? 'Unknown Bank',
+        bankName: data['bank'] ?? 'Bank Account',
         accountNumberMasked: (data['accountNumber']?.toString() ?? '').length > 4 
             ? 'XXXXXX${data['accountNumber'].toString().substring(data['accountNumber'].toString().length - 4)}'
-            : (data['accountNumber']?.toString() ?? 'Unknown'),
-        ifsc: data['ifsc'] ?? 'Unknown IFSC',
+            : (data['accountNumber']?.toString() ?? 'Not Set'),
+        ifsc: data['ifsc'] ?? '',
         verified: true,
       ),
       documents: docs,

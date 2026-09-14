@@ -20,7 +20,7 @@ class DocumentManagePage extends StatefulWidget {
 }
 
 class _DocumentManagePageState extends State<DocumentManagePage> {
-  late BusinessModel _business;
+  BusinessModel _business = BusinessModel.empty();
   _DocAction? _action;
   bool _hasChanges = false;
   String? _processingDoc;

@@ -179,6 +179,9 @@ class AuthService {
     return prefs.getString(_ownerNameKey);
   }
 
+  static const String _storeNameKey = 'ck_store_name';
+  static const String _businessStatusKey = 'ck_business_status';
+
   static Future<void> saveBusinessType(String type) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_businessTypeKey, type);
@@ -187,6 +190,26 @@ class AuthService {
   static Future<String?> getBusinessType() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_businessTypeKey);
+  }
+
+  static Future<void> saveStoreName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_storeNameKey, name);
+  }
+
+  static Future<String?> getStoreName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_storeNameKey);
+  }
+
+  static Future<void> saveBusinessStatus(String status) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_businessStatusKey, status);
+  }
+
+  static Future<String?> getBusinessStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_businessStatusKey);
   }
 
   // ─── User Preference: Biometric Opt-in ─────────────────────────

@@ -14,7 +14,10 @@ class MapboxService {
     if (mapboxAccessToken.startsWith('pk.')) {
       return 'https://api.mapbox.com/styles/v1/mapbox/$style/tiles/256/{z}/{x}/{y}@2x?access_token=$mapboxAccessToken';
     }
-    // High-contrast OpenStreetMap raster tile fallback if no Mapbox token present
+    // High-contrast raster tile fallback if no Mapbox token present:
+    if (style.contains('satellite')) {
+      return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    }
     return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   }
 
@@ -59,6 +62,7 @@ class MapboxService {
                 if (area.isEmpty) area = text;
               } else if (placeType == 'place' || placeType == 'district') {
                 if (city.isEmpty) city = text;
+                if (area.isEmpty) area = text;
               } else if (placeType == 'region') {
                 if (state.isEmpty) state = text;
               } else if (placeType == 'postcode') {
@@ -66,10 +70,14 @@ class MapboxService {
               }
             }
 
+            if (area.isEmpty && fullAddress.isNotEmpty) {
+              area = fullAddress.split(',').first.trim();
+            }
+
             if (fullAddress.isNotEmpty) {
               geo = {
                 'address': fullAddress,
-                'area': area,
+                'area': area.isNotEmpty ? area : (city.isNotEmpty ? city : fullAddress),
                 'city': city,
                 'state': state,
                 'pincode': pincode,
@@ -118,14 +126,21 @@ class MapboxService {
             }
           }
 
-          String area = suburb.isNotEmpty ? suburb : subdistrict;
+          String area = suburb.isNotEmpty
+              ? suburb
+              : (subdistrict.isNotEmpty
+                  ? subdistrict
+                  : (address['town'] ?? address['village'] ?? address['hamlet'] ?? road));
+          if (area.isEmpty && fullAddr.isNotEmpty) {
+            area = fullAddr.split(',').first.trim();
+          }
           String city = address['city'] ?? address['town'] ?? address['village'] ?? address['county'] ?? address['state_district'] ?? '';
           String state = address['state'] ?? '';
           String pincode = address['postcode'] ?? '';
 
           geo = {
             'address': fullAddr.isNotEmpty ? fullAddr : displayName,
-            'area': area,
+            'area': area.isNotEmpty ? area : (city.isNotEmpty ? city : (displayName.split(',').first.trim())),
             'city': city,
             'state': state,
             'pincode': pincode,
