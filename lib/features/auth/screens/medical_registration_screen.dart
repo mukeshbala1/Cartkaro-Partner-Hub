@@ -763,7 +763,7 @@ class _MedicalRegistrationScreenState
       if (_cancelledChequePath.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Please upload Cancelled Cheque / Bank Passbook (Required)"),
+            content: Text("Please upload Cancelled Cheque or Bank Passbook"),
             backgroundColor: Color(0xFFDC2626),
           ),
         );
@@ -2002,7 +2002,7 @@ class _MedicalRegistrationScreenState
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'Cancelled Cheque / Bank Passbook (Required) *'),
+        _SectionLabel(label: 'Cancelled Cheque / Bank Passbook *'),
         UploadCard(
           label: 'Upload Cancelled Cheque',
           filePath: _cancelledChequePath,
@@ -2015,9 +2015,9 @@ class _MedicalRegistrationScreenState
     );
   }
 
-  // ─────────────────────────────────────────
+  // ────────────────────────────────────────
   // STEP 7 — Medicine Delivery Setup
-  // ─────────────────────────────────────────
+  // ────────────────────────────────────────
   Widget _buildStep7() {
 
     return _StepWrapper(
@@ -2780,17 +2780,12 @@ class _SectionLabel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Flexible(
-            child: Text(
-              label.toUpperCase(),
+          Text(label.toUpperCase(),
               style: const TextStyle(
-                color: kNavyBlue,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-              ),
-            ),
-          ),
+                  color: kNavyBlue,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8)),
           const SizedBox(width: 10),
           Expanded(child: Container(height: 1, color: kDivider)),
         ],
@@ -3888,3 +3883,5 @@ class _DemoApp extends StatelessWidget {
     );
   }
 }
+
+
