@@ -324,51 +324,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _openBusinessSwitcher() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final activeId = await AuthService.getActiveBusinessId();
+    final effectiveUid = user?.uid ?? activeId ?? '';
     
     // Show a small loading indicator while fetching
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+      barrierDismissible: true,
+      builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.kPrimary)),
     );
     
+    List<BusinessModel> businesses = [];
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('businesses')
-          .where('ownerUid', isEqualTo: user.uid)
-          .get();
-          
-      if (!mounted) return;
-      Navigator.pop(context); // Close loading dialog
-      
-      final businesses = snapshot.docs.map((doc) {
-        final data = doc.data();
-        return BusinessModel.fromFirestore(data, doc.id);
-      }).toList();
-      
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: Colors.transparent,
-        isScrollControlled: true,
-        builder: (_) => _SwitchBusinessSheet(
-          businesses: businesses,
-          currentBusinessId: _business.id,
-          onSelect: (b) {
-            Navigator.pop(context);
-            context.go('/dashboard', extra: b.id);
-          },
-          onAddNew: () {
-            Navigator.pop(context); 
-            context.go('/business-type');
-          },
-        ),
-      );
+      if (effectiveUid.isNotEmpty) {
+        final snapshot = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: effectiveUid)
+            .get()
+            .timeout(const Duration(seconds: 4));
+            
+        businesses = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return BusinessModel.fromFirestore(data, doc.id);
+        }).toList();
+      }
     } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context); // Close loading dialog
       debugPrint('Error fetching businesses for switcher: $e');
+    } finally {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // Close loading dialog
+      }
     }
+
+    if (!mounted) return;
+
+    // Fallback: if list is empty but current _business has an ID, include it
+    if (businesses.isEmpty && _business.id.isNotEmpty) {
+      businesses = [_business];
+    }
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _SwitchBusinessSheet(
+        businesses: businesses,
+        currentBusinessId: _business.id,
+        onSelect: (b) {
+          Navigator.pop(context);
+          context.go('/dashboard', extra: b.id);
+        },
+        onAddNew: () {
+          Navigator.pop(context); 
+          context.go('/business-type');
+        },
+      ),
+    );
   }
 
   @override

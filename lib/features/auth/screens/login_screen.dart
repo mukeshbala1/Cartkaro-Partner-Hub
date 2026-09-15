@@ -104,6 +104,7 @@ class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
   _Step _step = _Step.phone;
   bool _loading = false;
+  bool _isSendingOtp = false;
   String _error = '';
   Country _country = kCountries[0];
   String? _verificationId;
@@ -256,6 +257,7 @@ class _LoginScreenState extends State<LoginScreen>
     debugPrint('Phone auth failed: ${e.code} - ${e.message}');
     setState(() {
       _loading = false;
+      _isSendingOtp = false;
       _error = _authErrorMessage(e);
     });
   }
@@ -287,17 +289,43 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _error = networkError);
       return;
     }
+
+    final isTestPhone = phone == '5555555555' || phone == '1234567890' || phone == '9876543210';
+
+    // 1. Immediately transition to OTP screen so partner never waits!
+    if (!forceResend) {
+      _transitionTo(_Step.otp);
+    }
+
     setState(() {
-      _loading = true;
+      _isSendingOtp = true;
+      _loading = false;
       _error = '';
+      _verificationId = null;
     });
+
     for (final controller in _otpCtrl) {
       controller.clear();
+    }
+    _startResend();
+
+    Future.delayed(const Duration(milliseconds: 180), () {
+      if (mounted) _otpFocus[0].requestFocus();
+    });
+
+    // 2. Disable SafetyNet/Play Integrity check for test numbers & debug mode to prevent 15-30s timeout hang
+    if (kDebugMode || isTestPhone) {
+      try {
+        await FirebaseAuth.instance.setSettings(appVerificationDisabledForTesting: true);
+      } catch (e) {
+        debugPrint('setSettings note: $e');
+      }
     }
 
     try {
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: _phoneNumber,
+        timeout: isTestPhone ? Duration.zero : const Duration(seconds: 15),
         forceResendingToken: forceResend ? _forceResendingToken : null,
         verificationCompleted: (credential) async {
           try {
@@ -311,10 +339,6 @@ class _LoginScreenState extends State<LoginScreen>
           } catch (e) {
             if (!mounted) return;
             debugPrint('Auto verification failed: $e');
-            setState(() {
-              _loading = false;
-              _error = 'Auto verification failed. Please enter OTP manually.';
-            });
           }
         },
         verificationFailed: (e) {
@@ -323,20 +347,19 @@ class _LoginScreenState extends State<LoginScreen>
         },
         codeSent: (verificationId, resendToken) {
           if (!mounted) return;
-          debugPrint('Phone auth code sent to $_phoneNumber');
-          _verificationId = verificationId;
-          _forceResendingToken = resendToken;
-          _transitionTo(_Step.otp);
-          setState(() => _loading = false);
-          _startResend();
-          Future.delayed(const Duration(milliseconds: 120), () {
-            if (mounted) _otpFocus[0].requestFocus();
+          debugPrint('Phone auth code sent to $_phoneNumber: $verificationId');
+          setState(() {
+            _verificationId = verificationId;
+            _forceResendingToken = resendToken;
+            _isSendingOtp = false;
           });
         },
         codeAutoRetrievalTimeout: (verificationId) {
           _verificationId = verificationId;
+          if (mounted) {
+            setState(() => _isSendingOtp = false);
+          }
         },
-        timeout: const Duration(seconds: 60),
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -345,6 +368,7 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
       debugPrint('phone auth request failed: $e');
       setState(() {
+        _isSendingOtp = false;
         _loading = false;
         _error = 'Could not send OTP. Please try again.';
       });
@@ -357,15 +381,34 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _error = 'Enter all 6 digits');
       return;
     }
-    final verificationId = _verificationId;
-    if (verificationId == null) {
-      setState(() => _error = 'Please request OTP again');
-      return;
-    }
+
     setState(() {
       _loading = true;
       _error = '';
     });
+
+    // If verificationId is still in flight (e.g. user typed code very quickly), wait up to 8s
+    if (_verificationId == null) {
+      int waitMs = 0;
+      while (_verificationId == null && waitMs < 8000 && mounted && _error.isEmpty) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        waitMs += 300;
+      }
+    }
+
+    if (!mounted) return;
+
+    final verificationId = _verificationId;
+    if (verificationId == null) {
+      setState(() {
+        _loading = false;
+        if (_error.isEmpty) {
+          _error = 'Connecting to SMS gateway... Please tap Verify again.';
+        }
+      });
+      return;
+    }
+
     try {
       final credential = PhoneAuthProvider.credential(
         verificationId: verificationId,
@@ -380,7 +423,7 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _error = _authErrorMessage(e));
     } catch (e) {
       if (!mounted) return;
-      debugPrint(' OTP verification failed: $e');
+      debugPrint('OTP verification failed: $e');
       setState(() => _error = 'Could not verify OTP. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -392,6 +435,15 @@ class _LoginScreenState extends State<LoginScreen>
     if (user == null) {
       if (mounted) context.go('/login');
       return;
+    }
+
+    final rawPhone = _phoneCtrl.text.trim();
+    if (rawPhone.isNotEmpty) {
+      await AuthService.savePhoneNumber(rawPhone);
+    } else if (user.phoneNumber != null && user.phoneNumber!.isNotEmpty) {
+      var p = user.phoneNumber!;
+      if (p.startsWith('+91')) p = p.substring(3);
+      await AuthService.savePhoneNumber(p);
     }
 
     bool hasPin = await AuthService.isPinSet();
@@ -430,6 +482,7 @@ class _LoginScreenState extends State<LoginScreen>
       c.clear();
     }
     _verificationId = null;
+    _isSendingOtp = false;
     _transitionTo(_Step.phone);
   }
 
@@ -940,7 +993,34 @@ class _LoginScreenState extends State<LoginScreen>
           'Code sent to ${_country.code} ${_phoneCtrl.text}',
           style: const TextStyle(fontSize: 13.5, color: kSubText),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 8),
+        if (_isSendingOtp)
+          Row(
+            children: const [
+              SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2, color: kAccentBlue),
+              ),
+              SizedBox(width: 8),
+              Text(
+                'Requesting OTP from server...',
+                style: TextStyle(fontSize: 12, color: kAccentBlue, fontWeight: FontWeight.w600),
+              ),
+            ],
+          )
+        else if (_verificationId != null)
+          Row(
+            children: const [
+              Icon(LucideIcons.checkCircle, size: 14, color: Color(0xFF16A34A)),
+              SizedBox(width: 6),
+              Text(
+                'OTP dispatched via SMS',
+                style: TextStyle(fontSize: 12, color: Color(0xFF16A34A), fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        const SizedBox(height: 18),
         _fieldLabel('6-Digit Code'),
         const SizedBox(height: 8),
         _buildOtpBoxes(),

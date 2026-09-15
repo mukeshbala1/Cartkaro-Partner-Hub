@@ -212,6 +212,18 @@ class AuthService {
     return prefs.getString(_businessStatusKey);
   }
 
+  static const String _phoneNumberKey = 'ck_user_phone_number';
+
+  static Future<void> savePhoneNumber(String phone) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_phoneNumberKey, phone);
+  }
+
+  static Future<String?> getPhoneNumber() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_phoneNumberKey);
+  }
+
   // ─── User Preference: Biometric Opt-in ─────────────────────────
 
   /// Check if the user has enabled biometric sign-in (defaults to true).

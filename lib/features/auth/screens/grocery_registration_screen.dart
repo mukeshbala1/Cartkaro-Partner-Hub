@@ -19,7 +19,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import '../../../core/services/mapbox_service.dart';
 import '../widgets/mapbox_location_picker.dart';
 import '../../../core/utils/safe_image_provider.dart';
@@ -51,11 +51,11 @@ const Color kDivider        = Color(0xFFEEF2F8);
 // ENTRY POINT — MAIN SCREEN
 // ─────────────────────────────────────────
 class GroceryRegistrationScreen extends StatefulWidget {
-  final String prefilledMobile;
+  final String? prefilledMobile;
 
   const GroceryRegistrationScreen({
     Key? key,
-    this.prefilledMobile = '9876543210',
+    this.prefilledMobile,
   }) : super(key: key);
 
   @override
@@ -741,6 +741,19 @@ class _GroceryRegistrationScreenState
       }
     }
 
+    // Step 5 (Step 6 in UI - Bank Details): Cancelled Cheque is Mandatory
+    if (_currentStep == 5) {
+      if (_cancelledChequePath.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload Cancelled Cheque / Bank Passbook (Required)"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
+
     if (_currentStep == 7 && !_agreementAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -771,11 +784,14 @@ class _GroceryRegistrationScreenState
           }
 
           final effectiveUid = user?.uid ?? (await AuthService.getActiveBusinessId()) ?? DateTime.now().millisecondsSinceEpoch.toString();
-          final effectiveMobile = (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
-              ? user.phoneNumber!
-              : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
-                  ? widget.prefilledMobile!
-                  : _altMobileCtrl.text.trim();
+          final storedPhone = await AuthService.getPhoneNumber();
+          final effectiveMobile = (storedPhone != null && storedPhone.trim().isNotEmpty)
+              ? storedPhone.trim()
+              : (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
+                  ? user.phoneNumber!
+                  : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
+                      ? widget.prefilledMobile!
+                      : _altMobileCtrl.text.trim();
 
           // Rule: 1 Number/Account -> Max 3 Businesses (1 Grocery, 1 Restaurant, 1 Medical)
           if (effectiveUid.isNotEmpty) {
@@ -858,65 +874,72 @@ class _GroceryRegistrationScreenState
           await AuthService.saveStoreName(storeName);
           await AuthService.saveBusinessStatus('pending');
 
-          // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE ──
-          final uploadedProfilePhoto = await CloudStorageService.uploadFile(
-            localPath: _profilePhotoPath,
-            destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
-            fallback: _profilePhotoPath,
-          );
+          // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE (IN PARALLEL) ──
+          final uploadResults = await Future.wait([
+            CloudStorageService.uploadFile(
+              localPath: _profilePhotoPath,
+              destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
+              fallback: _profilePhotoPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _storeLogoPath,
+              destinationPath: 'businesses/$businessId/branding/logo.jpg',
+              fallback: _storeLogoPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _storeBannerPath,
+              destinationPath: 'businesses/$businessId/branding/banner.jpg',
+              fallback: _storeBannerPath,
+            ),
+            CloudStorageService.uploadMultipleFiles(
+              localPaths: _storePhotos,
+              destinationFolder: 'businesses/$businessId/photos',
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _fssaiCertPath,
+              destinationPath: 'businesses/$businessId/documents/fssai_cert',
+              fallback: _fssaiCertPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _gstCertPath,
+              destinationPath: 'businesses/$businessId/documents/gst_cert',
+              fallback: _gstCertPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _tradeLicensePath,
+              destinationPath: 'businesses/$businessId/documents/trade_license',
+              fallback: _tradeLicensePath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _panDocPath,
+              destinationPath: 'businesses/$businessId/documents/pan_doc',
+              fallback: _panDocPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _aadhaarDocPath,
+              destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
+              fallback: _aadhaarDocPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _cancelledChequePath,
+              destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
+              fallback: _cancelledChequePath,
+            ),
+          ]);
 
-          final uploadedLogo = await CloudStorageService.uploadFile(
-            localPath: _storeLogoPath,
-            destinationPath: 'businesses/$businessId/branding/logo.jpg',
-            fallback: _storeLogoPath,
-          );
+          final uploadedProfilePhoto = uploadResults[0] as String;
+          final uploadedLogo = uploadResults[1] as String;
+          final uploadedBanner = uploadResults[2] as String;
+          final uploadedPhotos = uploadResults[3] as List<String>;
+          final uploadedFssai = uploadResults[4] as String;
+          final uploadedGst = uploadResults[5] as String;
+          final uploadedTrade = uploadResults[6] as String;
+          final uploadedPan = uploadResults[7] as String;
+          final uploadedAadhaar = uploadResults[8] as String;
+          final uploadedCheque = uploadResults[9] as String;
 
-          final uploadedBanner = await CloudStorageService.uploadFile(
-            localPath: _storeBannerPath,
-            destinationPath: 'businesses/$businessId/branding/banner.jpg',
-            fallback: _storeBannerPath,
-          );
-
-          final uploadedPhotos = await CloudStorageService.uploadMultipleFiles(
-            localPaths: _storePhotos,
-            destinationFolder: 'businesses/$businessId/photos',
-          );
-
-          final uploadedFssai = await CloudStorageService.uploadFile(
-            localPath: _fssaiCertPath,
-            destinationPath: 'businesses/$businessId/documents/fssai_cert',
-            fallback: _fssaiCertPath,
-          );
-
-          final uploadedGst = await CloudStorageService.uploadFile(
-            localPath: _gstCertPath,
-            destinationPath: 'businesses/$businessId/documents/gst_cert',
-            fallback: _gstCertPath,
-          );
-
-          final uploadedTrade = await CloudStorageService.uploadFile(
-            localPath: _tradeLicensePath,
-            destinationPath: 'businesses/$businessId/documents/trade_license',
-            fallback: _tradeLicensePath,
-          );
-
-          final uploadedPan = await CloudStorageService.uploadFile(
-            localPath: _panDocPath,
-            destinationPath: 'businesses/$businessId/documents/pan_doc',
-            fallback: _panDocPath,
-          );
-
-          final uploadedAadhaar = await CloudStorageService.uploadFile(
-            localPath: _aadhaarDocPath,
-            destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
-            fallback: _aadhaarDocPath,
-          );
-
-          final uploadedCheque = await CloudStorageService.uploadFile(
-            localPath: _cancelledChequePath,
-            destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
-            fallback: _cancelledChequePath,
-          );
+          final now = DateTime.now();
+          final formattedDate = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
 
           final businessData = {
             'userId': effectiveUid,
@@ -925,12 +948,21 @@ class _GroceryRegistrationScreenState
             'status': 'pending',
             'isLive': false,
             'createdAt': FieldValue.serverTimestamp(),
+            'publishedAt': FieldValue.serverTimestamp(),
+            'publishedDate': formattedDate,
+            'registrationDate': formattedDate,
+            'submittedAt': FieldValue.serverTimestamp(),
+            'formPublishDate': formattedDate,
+            'agreementAccepted': true,
+            'termsAccepted': true,
+            'agreementAcceptedAt': FieldValue.serverTimestamp(),
             'name': _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store',
             'storeName': _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store',
             'address': _storeAddressCtrl.text.trim(),
             'storeAddress': _storeAddressCtrl.text.trim(),
             'mobile': effectiveMobile,
             'phoneNumber': effectiveMobile,
+            'ownerPhone': effectiveMobile,
             'ownerName': _ownerNameCtrl.text.trim(),
             'email': _emailCtrl.text.trim(),
             'altMobile': _altMobileCtrl.text.trim(),
@@ -972,6 +1004,8 @@ class _GroceryRegistrationScreenState
             'cancelledChequePath': uploadedCheque,
             'deliveryOption': _deliveryOption,
             'minOrder': _minOrderCtrl.text.trim(),
+            'minOrderAmount': _minOrderCtrl.text.trim(),
+            'minimumOrderAmount': _minOrderCtrl.text.trim(),
             'estDelivery': _estDeliveryCtrl.text.trim(),
           };
 
@@ -999,6 +1033,13 @@ class _GroceryRegistrationScreenState
           }
 
           if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🎉 Registration submitted! Opening Dashboard...'),
+                backgroundColor: Color(0xFF15803D),
+                duration: Duration(seconds: 4),
+              ),
+            );
             context.go('/dashboard', extra: businessId);
           }
           return;
@@ -1088,7 +1129,6 @@ class _GroceryRegistrationScreenState
                           _buildStep6(),
                           _buildStep7(),
                           _buildStep8(),
-                          _SuccessScreen(businessId: _savedBusinessId),
                         ],
                       ),
                     ),
@@ -1167,7 +1207,7 @@ class _GroceryRegistrationScreenState
                   ),
                   if (_currentStep < 8)
                     Text(
-                      'Step ${_currentStep + 1} of 9  •  ${_stepTitles[_currentStep]}',
+                      'Step ${_currentStep + 1} of 8  •  ${_stepTitles[_currentStep]}',
                       style: const TextStyle(
                         color: Color(0xFF6B8BAB),
                         fontSize: 11,
@@ -1192,7 +1232,6 @@ class _GroceryRegistrationScreenState
     'Bank Details',
     'Delivery Settings',
     'Agreement',
-    'Success',
   ];
 
   Widget _buildProgressBar(
@@ -1242,7 +1281,7 @@ class _GroceryRegistrationScreenState
             ),
           ),
           LinearProgressIndicator(
-            value: (_currentStep + 1) / 9,
+            value: (_currentStep + 1) / 8,
             backgroundColor: kNavyBlueLight,
             valueColor: const AlwaysStoppedAnimation<Color>(kWhite),
             minHeight: 3,
@@ -1927,7 +1966,7 @@ class _GroceryRegistrationScreenState
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'Cancelled Cheque  (Optional)'),
+        _SectionLabel(label: 'Cancelled Cheque / Bank Passbook (Required) *'),
         UploadCard(
           label: 'Upload Cancelled Cheque',
           filePath: _cancelledChequePath,
@@ -2118,326 +2157,6 @@ class _GroceryRegistrationScreenState
     );
   }
 }
-
-// ================================================================
-// FIX 2: STEP 9 — SUCCESS SCREEN (StatefulWidget)
-// 5 second loading → fir success + dashboard button
-// ================================================================
-class _SuccessScreen extends StatefulWidget {
-  final String? businessId;
-  const _SuccessScreen({this.businessId});
-
-  @override
-  State<_SuccessScreen> createState() => _SuccessScreenState();
-}
-
-class _SuccessScreenState extends State<_SuccessScreen> {
-  bool _showLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    // ✅ 5 second baad loading screen hatao
-    Future.delayed(const Duration(seconds: 5), () {
-      if (mounted) {
-        setState(() => _showLoading = false);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_showLoading) {
-      // ── LOADING STATE: 24-48 Hours processing screen ──
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: kBlueAccent,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: kNavyBlue, width: 2.5),
-                ),
-                child: const Icon(
-                  Icons.hourglass_top_rounded,
-                  color: kNavyBlue,
-                  size: 52,
-                ),
-              ),
-              const SizedBox(height: 28),
-              const Text(
-                'Processing Your\nRegistration...',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: kNavyBlueDark,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  height: 1.3,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Please wait while we securely\nsubmit your details.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: kTextSecondary,
-                  fontSize: 14,
-                  height: 1.55,
-                ),
-              ),
-              const SizedBox(height: 36),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: kNavyBlueDark,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.schedule_rounded, color: kWhite, size: 32),
-                    SizedBox(width: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Expected Verification Time',
-                          style: TextStyle(
-                            color: Color(0xFF8DA4BF),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          '24 – 48 Hours',
-                          style: TextStyle(
-                            color: kWhite,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 32),
-              const SizedBox(
-                width: 36,
-                height: 36,
-                child: CircularProgressIndicator(
-                  color: kNavyBlue,
-                  strokeWidth: 3,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Submitting your information...',
-                style: TextStyle(
-                  color: kTextSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // ── SUCCESS STATE: Registration complete ──
-    return SingleChildScrollView(
-      physics: const ClampingScrollPhysics(),
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              color: kBlueAccent,
-              shape: BoxShape.circle,
-              border: Border.all(color: kNavyBlue, width: 2.5),
-            ),
-            child: const Icon(
-              Icons.check_circle_rounded,
-              color: kNavyBlue,
-              size: 52,
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Registration Completed\nSuccessfully!',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: kNavyBlueDark,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              height: 1.3,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Your grocery store is now under review.\nOur team will verify your documents.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: kTextSecondary,
-              fontSize: 14,
-              height: 1.55,
-            ),
-          ),
-          const SizedBox(height: 32),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: kWhite,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: kBorderColor),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                )
-              ],
-            ),
-            child: Column(
-              children: const [
-                _SuccessCheckItem(label: 'Account Created', done: true),
-                SizedBox(height: 14),
-                _SuccessCheckItem(label: 'Store Details Added', done: true),
-                SizedBox(height: 14),
-                _SuccessCheckItem(
-                    label: 'Documents Submitted', done: true),
-                SizedBox(height: 14),
-                _SuccessCheckItem(
-                    label: 'Verification Pending',
-                    done: false,
-                    pending: true),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: kNavyBlueDark,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: const [
-                Icon(Icons.schedule_rounded, color: kWhite, size: 30),
-                SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Expected Verification Time',
-                      style: TextStyle(
-                        color: Color(0xFF8DA4BF),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      '24 – 48 Hours',
-                      style: TextStyle(
-                        color: kWhite,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                if (widget.businessId != null) {
-                  context.go('/dashboard', extra: widget.businessId);
-                } else {
-                  context.go('/business-type');
-                }
-              },
-
-              icon: const Icon(
-                Icons.dashboard_rounded,
-                size: 20,
-              ),
-
-              label: const Text(
-                'Go To Dashboard',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kNavyBlue,
-                foregroundColor: kWhite,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextButton.icon(
-              onPressed: () async {
-                final Uri callUri = Uri(
-                  scheme: 'tel',
-                  path: '+919876543210',
-                );
-
-                if (await canLaunchUrl(callUri)) {
-                  await launchUrl(callUri);
-                }
-              },
-
-              icon: const Icon(
-                Icons.call,
-                color: kNavyBlueLight,
-                size: 18,
-              ),
-
-              label: const Text(
-                'Need help? Contact Partner Support\n+91 98765 43210',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: kNavyBlueLight,
-                  fontWeight: FontWeight.w600,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Dashboard Placeholder — apne actual DashboardScreen se replace karo ──
 
 
 // ================================================================
@@ -3061,13 +2780,15 @@ class _SectionLabel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Text(
-            label.toUpperCase(),
-            style: const TextStyle(
-              color: kNavyBlue,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
+          Flexible(
+            child: Text(
+              label.toUpperCase(),
+              style: const TextStyle(
+                color: kNavyBlue,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -3167,85 +2888,101 @@ class _ProfilePhotoUpload extends StatelessWidget {
 }
 
 class _PrefilledMobileField extends StatelessWidget {
-  final String mobile;
-  const _PrefilledMobileField({required this.mobile});
+  final String? mobile;
+  const _PrefilledMobileField({this.mobile});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: const [
-            Text(
-              'Mobile Number',
-              style: TextStyle(
-                color: kTextPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            SizedBox(width: 8),
-            Icon(Icons.verified_rounded, color: kNavyBlue, size: 15),
-            SizedBox(width: 4),
-            Text(
-              'OTP Verified',
-              style: TextStyle(
-                color: kNavyBlueDark,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 7),
-        Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF3F5F9),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: kBorderColor),
-          ),
-          child: Row(
-            children: [
-              const Text(
-                '🇮🇳  +91',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: kTextSecondary,
-                ),
-              ),
-              Container(
-                width: 1,
-                height: 18,
-                color: kBorderColor,
-                margin:
-                    const EdgeInsets.symmetric(horizontal: 12),
-              ),
-              Expanded(
-                child: Text(
-                  mobile,
-                  style: const TextStyle(
-                    color: kTextSecondary,
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 0.5,
+    return FutureBuilder<String?>(
+      future: (mobile != null && mobile!.trim().isNotEmpty)
+          ? Future.value(mobile)
+          : AuthService.getPhoneNumber(),
+      builder: (context, snapshot) {
+        String displayMobile = snapshot.data ?? mobile ?? '';
+        if (displayMobile.isEmpty) {
+          final currentUser = FirebaseAuth.instance.currentUser;
+          displayMobile = currentUser?.phoneNumber ?? '';
+        }
+        displayMobile = displayMobile.replaceAll('+91', '').trim();
+        if (displayMobile.isEmpty) {
+          displayMobile = 'Mobile Number';
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Text(
+                  'Mobile Number',
+                  style: TextStyle(
+                    color: kTextPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+                SizedBox(width: 8),
+                Icon(Icons.verified_rounded, color: kNavyBlue, size: 15),
+                SizedBox(width: 4),
+                Text(
+                  'OTP Verified',
+                  style: TextStyle(
+                    color: kNavyBlueDark,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F5F9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kBorderColor),
               ),
-              const Icon(Icons.lock_outline_rounded,
-                  color: kTextHint, size: 16),
-            ],
-          ),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Mobile number cannot be changed. Contact support to update.',
-          style: TextStyle(color: kTextHint, fontSize: 11),
-        ),
-      ],
+              child: Row(
+                children: [
+                  const Text(
+                    '🇮🇳  +91',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: kTextSecondary,
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 18,
+                    color: kBorderColor,
+                    margin:
+                        const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  Expanded(
+                    child: Text(
+                      displayMobile,
+                      style: const TextStyle(
+                        color: kTextSecondary,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.lock_outline_rounded,
+                      color: kTextHint, size: 16),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Mobile number cannot be changed. Contact support to update.',
+              style: TextStyle(color: kTextHint, fontSize: 11),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -4177,79 +3914,6 @@ class _BankSelectorField extends StatelessWidget {
           },
         );
       },
-    );
-  }
-}
-
-class _SuccessCheckItem extends StatelessWidget {
-  final String label;
-  final bool done;
-  final bool pending;
-
-  const _SuccessCheckItem({
-    required this.label,
-    required this.done,
-    this.pending = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: done
-                ? kNavyBlue
-                : pending
-                    ? kWarningColor.withOpacity(0.15)
-                    : kOffWhite,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: done
-                  ? kNavyBlue
-                  : pending
-                      ? kWarningColor
-                      : kBorderColor,
-              width: 1.5,
-            ),
-          ),
-          child: done
-              ? const Icon(Icons.check, color: kWhite, size: 17)
-              : pending
-                  ? const Icon(
-                      Icons.hourglass_empty_rounded,
-                      color: kWarningColor,
-                      size: 16,
-                    )
-                  : null,
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: done
-                  ? kNavyBlueDark
-                  : pending
-                      ? kWarningColor
-                      : kTextSecondary,
-              fontWeight:
-                  done || pending ? FontWeight.w600 : FontWeight.w400,
-              fontSize: 14,
-            ),
-          ),
-        ),
-        Text(
-          done ? 'Done' : pending ? 'Pending' : '',
-          style: TextStyle(
-            color: done ? kNavyBlueDark : kWarningColor,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
     );
   }
 }
