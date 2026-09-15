@@ -22,6 +22,7 @@ import '../widgets/mapbox_location_picker.dart';
 import '../../../core/utils/safe_image_provider.dart';
 import '../widgets/web_wizard_layout.dart';
 import '../../../core/services/auth_service.dart';
+import '../../../core/services/cloud_storage_service.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 // ─────────────────────────────────────────
@@ -811,6 +812,66 @@ class _RestaurantRegistrationScreenState
           await AuthService.saveStoreName(storeName);
           await AuthService.saveBusinessStatus('pending');
 
+          // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE ──
+          final uploadedProfilePhoto = await CloudStorageService.uploadFile(
+            localPath: _profilePhotoPath,
+            destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
+            fallback: _profilePhotoPath,
+          );
+
+          final uploadedLogo = await CloudStorageService.uploadFile(
+            localPath: _restaurantLogoPath,
+            destinationPath: 'businesses/$businessId/branding/logo.jpg',
+            fallback: _restaurantLogoPath,
+          );
+
+          final uploadedBanner = await CloudStorageService.uploadFile(
+            localPath: _restaurantBannerPath,
+            destinationPath: 'businesses/$businessId/branding/banner.jpg',
+            fallback: _restaurantBannerPath,
+          );
+
+          final uploadedPhotos = await CloudStorageService.uploadMultipleFiles(
+            localPaths: _restaurantPhotos,
+            destinationFolder: 'businesses/$businessId/photos',
+          );
+
+          final uploadedFssai = await CloudStorageService.uploadFile(
+            localPath: _fssaiCertPath,
+            destinationPath: 'businesses/$businessId/documents/fssai_cert',
+            fallback: _fssaiCertPath,
+          );
+
+          final uploadedGst = await CloudStorageService.uploadFile(
+            localPath: _gstCertPath,
+            destinationPath: 'businesses/$businessId/documents/gst_cert',
+            fallback: _gstCertPath,
+          );
+
+          final uploadedTrade = await CloudStorageService.uploadFile(
+            localPath: _tradeLicensePath,
+            destinationPath: 'businesses/$businessId/documents/trade_license',
+            fallback: _tradeLicensePath,
+          );
+
+          final uploadedPan = await CloudStorageService.uploadFile(
+            localPath: _panDocPath,
+            destinationPath: 'businesses/$businessId/documents/pan_doc',
+            fallback: _panDocPath,
+          );
+
+          final uploadedAadhaar = await CloudStorageService.uploadFile(
+            localPath: _aadhaarDocPath,
+            destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
+            fallback: _aadhaarDocPath,
+          );
+
+          final uploadedCheque = await CloudStorageService.uploadFile(
+            localPath: _cancelledChequePath,
+            destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
+            fallback: _cancelledChequePath,
+          );
+
           final businessData = {
             'userId': effectiveUid,
             'ownerUid': effectiveUid,
@@ -828,7 +889,7 @@ class _RestaurantRegistrationScreenState
             'email': _emailCtrl.text.trim(),
             'altMobile': _altMobileCtrl.text.trim(),
             'altCountryCode': _altCountryCode,
-            'profilePhotoPath': _profilePhotoPath,
+            'profilePhotoPath': uploadedProfilePhoto,
             'area': _areaCtrl.text.trim(),
             'city': _cityCtrl.text.trim(),
             'state': _stateCtrl.text.trim(),
@@ -837,11 +898,11 @@ class _RestaurantRegistrationScreenState
             'lng': _lngCtrl.text.trim(),
             'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
             'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
-            'logoUrl': _restaurantLogoPath,
-            'restaurantLogoPath': _restaurantLogoPath,
-            'bannerUrl': _restaurantBannerPath,
-            'restaurantBannerPath': _restaurantBannerPath,
-            'restaurantPhotos': _restaurantPhotos,
+            'logoUrl': uploadedLogo,
+            'restaurantLogoPath': uploadedLogo,
+            'bannerUrl': uploadedBanner,
+            'restaurantBannerPath': uploadedBanner,
+            'restaurantPhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _restaurantPhotos,
             'categories': _selectedCategories.toList(),
             'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
             'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
@@ -854,11 +915,12 @@ class _RestaurantRegistrationScreenState
             'tradeLicense': _tradeLicenseCtrl.text.trim(),
             'pan': _panCtrl.text.trim(),
             'aadhaar': _aadhaarCtrl.text.trim(),
-            'fssaiCertPath': _fssaiCertPath,
-            'gstCertPath': _gstCertPath,
-            'tradeLicensePath': _tradeLicensePath,
-            'panDocPath': _panDocPath,
-            'aadhaarDocPath': _aadhaarDocPath,
+            'fssaiCertPath': uploadedFssai,
+            'gstCertPath': uploadedGst,
+            'tradeLicensePath': uploadedTrade,
+            'panDocPath': uploadedPan,
+            'aadhaarDocPath': uploadedAadhaar,
+            'cancelledChequePath': uploadedCheque,
             'accountHolder': _accountHolderCtrl.text.trim(),
             'accountNumber': _accountNumberCtrl.text.trim(),
             'ifsc': _ifscCtrl.text.trim(),

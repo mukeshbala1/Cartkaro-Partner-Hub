@@ -24,6 +24,7 @@ import '../widgets/mapbox_location_picker.dart';
 import '../../../core/utils/safe_image_provider.dart';
 import '../widgets/web_wizard_layout.dart';
 import '../../../core/services/auth_service.dart';
+import '../../../core/services/cloud_storage_service.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 // ─────────────────────────────────────────
@@ -871,6 +872,66 @@ class _MedicalRegistrationScreenState
           await AuthService.saveStoreName(storeName);
           await AuthService.saveBusinessStatus('pending');
 
+          // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE ──
+          final uploadedProfilePhoto = await CloudStorageService.uploadFile(
+            localPath: _profilePhotoPath,
+            destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
+            fallback: _profilePhotoPath,
+          );
+
+          final uploadedLogo = await CloudStorageService.uploadFile(
+            localPath: _medicalLogo,
+            destinationPath: 'businesses/$businessId/branding/logo.jpg',
+            fallback: _medicalLogo,
+          );
+
+          final uploadedBanner = await CloudStorageService.uploadFile(
+            localPath: _medicalBanner,
+            destinationPath: 'businesses/$businessId/branding/banner.jpg',
+            fallback: _medicalBanner,
+          );
+
+          final uploadedPhotos = await CloudStorageService.uploadMultipleFiles(
+            localPaths: _medicalPhotos,
+            destinationFolder: 'businesses/$businessId/photos',
+          );
+
+          final uploadedDrugLicense = await CloudStorageService.uploadFile(
+            localPath: _drugLicenseCertPath,
+            destinationPath: 'businesses/$businessId/documents/drug_license_cert',
+            fallback: _drugLicenseCertPath,
+          );
+
+          final uploadedPharmacistCert = await CloudStorageService.uploadFile(
+            localPath: _pharmacistCertPath,
+            destinationPath: 'businesses/$businessId/documents/pharmacist_cert',
+            fallback: _pharmacistCertPath,
+          );
+
+          final uploadedGst = await CloudStorageService.uploadFile(
+            localPath: _gstCertPath,
+            destinationPath: 'businesses/$businessId/documents/gst_cert',
+            fallback: _gstCertPath,
+          );
+
+          final uploadedPan = await CloudStorageService.uploadFile(
+            localPath: _panDocPath,
+            destinationPath: 'businesses/$businessId/documents/pan_doc',
+            fallback: _panDocPath,
+          );
+
+          final uploadedAadhaar = await CloudStorageService.uploadFile(
+            localPath: _aadhaarDocPath,
+            destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
+            fallback: _aadhaarDocPath,
+          );
+
+          final uploadedCheque = await CloudStorageService.uploadFile(
+            localPath: _cancelledChequePath,
+            destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
+            fallback: _cancelledChequePath,
+          );
+
           final businessData = {
             'userId': effectiveUid,
             'ownerUid': effectiveUid,
@@ -888,7 +949,7 @@ class _MedicalRegistrationScreenState
             'email': _emailCtrl.text.trim(),
             'altMobile': _altMobileCtrl.text.trim(),
             'altCountryCode': _altCountryCode,
-            'profilePhotoPath': _profilePhotoPath,
+            'profilePhotoPath': uploadedProfilePhoto,
             'area': _areaCtrl.text.trim(),
             'city': _cityCtrl.text.trim(),
             'state': _stateCtrl.text.trim(),
@@ -897,11 +958,11 @@ class _MedicalRegistrationScreenState
             'lng': _lngCtrl.text.trim(),
             'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
             'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
-            'logoUrl': _medicalLogo,
-            'medicalLogo': _medicalLogo,
-            'bannerUrl': _medicalBanner,
-            'medicalBanner': _medicalBanner,
-            'medicalPhotos': _medicalPhotos,
+            'logoUrl': uploadedLogo,
+            'medicalLogo': uploadedLogo,
+            'bannerUrl': uploadedBanner,
+            'medicalBanner': uploadedBanner,
+            'medicalPhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _medicalPhotos,
             'categories': _selectedCategories.toList(),
             'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
             'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
@@ -915,17 +976,17 @@ class _MedicalRegistrationScreenState
             'tradeLicense': _tradeLicenseCtrl.text.trim(),
             'pan': _panCtrl.text.trim(),
             'aadhaar': _aadhaarCtrl.text.trim(),
-            'drugLicenseCertPath': _drugLicenseCertPath,
-            'pharmacistCertPath': _pharmacistCertPath,
-            'gstCertPath': _gstCertPath,
-            'panDocPath': _panDocPath,
-            'aadhaarDocPath': _aadhaarDocPath,
+            'drugLicenseCertPath': uploadedDrugLicense,
+            'pharmacistCertPath': uploadedPharmacistCert,
+            'gstCertPath': uploadedGst,
+            'panDocPath': uploadedPan,
+            'aadhaarDocPath': uploadedAadhaar,
+            'cancelledChequePath': uploadedCheque,
             'accountHolder': _accountHolderCtrl.text.trim(),
             'accountNumber': _accountNumberCtrl.text.trim(),
             'ifsc': _ifscCtrl.text.trim(),
             'upi': _upiCtrl.text.trim(),
             'bank': _selectedBank,
-            'cancelledChequePath': _cancelledChequePath,
             'deliveryOption': _deliveryOption,
             'isPrescriptionRequired': _isPrescriptionRequired,
             'isSameDayDelivery': _isSameDayDelivery,
