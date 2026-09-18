@@ -152,6 +152,9 @@ class AuthService {
     await prefs.remove(_businessIdKey);
     await prefs.remove(_ownerNameKey);
     await prefs.remove(_businessTypeKey);
+    await prefs.remove(_phoneNumberKey);
+    await prefs.remove('ck_store_name');
+    await prefs.remove('ck_business_status');
   }
 
   // ─── Business Session Caching ──────────────────────────────────
@@ -212,6 +215,18 @@ class AuthService {
     return prefs.getString(_businessStatusKey);
   }
 
+  static const String _phoneNumberKey = 'ck_phone_number';
+
+  static Future<void> savePhoneNumber(String phone) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_phoneNumberKey, phone);
+  }
+
+  static Future<String?> getPhoneNumber() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_phoneNumberKey);
+  }
+
   // ─── User Preference: Biometric Opt-in ─────────────────────────
 
   /// Check if the user has enabled biometric sign-in (defaults to true).
@@ -246,10 +261,11 @@ class AuthService {
       final isSupported = await _localAuth.isDeviceSupported();
       final canCheck = await _localAuth.canCheckBiometrics;
       final available = await _localAuth.getAvailableBiometrics();
-      final isEnrolled = available.isNotEmpty;
+      final isEnrolled = available.isNotEmpty || canCheck;
       final isEnabledByUser = await isBiometricEnabledByUser();
 
-      final bool hasFace = available.contains(BiometricType.face);
+      final bool hasFace = available.contains(BiometricType.face) ||
+          available.contains(BiometricType.weak);
       final bool hasFingerprint = available.contains(BiometricType.fingerprint) ||
           available.contains(BiometricType.strong);
 
@@ -370,17 +386,20 @@ class AuthService {
   // ─── Biometric Execution ────────────────────────────────────────
 
   /// Prompt the user for biometric authentication with structured result.
-  static Future<BiometricAuthResult> authenticateWithBiometricsDetailed({String? customReason}) async {
+  static Future<BiometricAuthResult> authenticateWithBiometricsDetailed({
+    String? customReason,
+    bool biometricOnly = true,
+  }) async {
     try {
       final info = await getDeviceBiometricInfo();
       final reason = customReason ?? info.promptReason;
 
       final authenticated = await _localAuth.authenticate(
         localizedReason: reason,
-        options: const AuthenticationOptions(
-          biometricOnly: false,
+        options: AuthenticationOptions(
+          biometricOnly: biometricOnly,
           stickyAuth: true,
-          useErrorDialogs: true,
+          useErrorDialogs: false,
         ),
       );
       return BiometricAuthResult(success: authenticated);

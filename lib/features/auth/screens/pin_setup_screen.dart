@@ -225,7 +225,7 @@ class _PinSetupScreenState extends State<PinSetupScreen>
             TextButton(
               onPressed: () async {
                 Navigator.of(ctx).pop();
-                await AuthService.setBiometricEnabled(false);
+                await AuthService.setBiometricEnabled(true);
                 if (mounted) _navigateAfterSetup();
               },
               child: Text(

@@ -6,7 +6,7 @@ import 'package:cartkaro_partner_hub/core/constants/app_colors.dart';
 
 ImageProvider? getSafeImageProvider(String? path, {ImageProvider? fallback}) {
   if (path == null || path.trim().isEmpty) return fallback;
-  final cleanPath = path.trim();
+  var cleanPath = path.trim();
   if (cleanPath.startsWith('assets/') || cleanPath.startsWith('assets')) {
     return AssetImage(cleanPath);
   }
@@ -18,6 +18,9 @@ ImageProvider? getSafeImageProvider(String? path, {ImageProvider? fallback}) {
       return NetworkImage(cleanPath);
     }
     return fallback;
+  }
+  if (cleanPath.startsWith('file://')) {
+    cleanPath = cleanPath.replaceFirst('file://', '');
   }
   if (!kIsWeb) {
     try {
@@ -110,7 +113,11 @@ class SafeImageWidget extends StatelessWidget {
 
     if (!kIsWeb) {
       try {
-        final file = File(path);
+        var localPath = path;
+        if (localPath.startsWith('file://')) {
+          localPath = localPath.replaceFirst('file://', '');
+        }
+        final file = File(localPath);
         if (file.existsSync()) {
           return Image.file(
             file,

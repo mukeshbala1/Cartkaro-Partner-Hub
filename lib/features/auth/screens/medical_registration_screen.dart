@@ -19,6 +19,7 @@ import 'package:geocoding/geocoding.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import '../../../core/services/mapbox_service.dart';
 import '../widgets/mapbox_location_picker.dart';
 import '../../../core/utils/safe_image_provider.dart';
@@ -51,11 +52,11 @@ const Color kDivider        = Color(0xFFEEF2F8);
 // ENTRY POINT — MAIN SCREEN
 // ─────────────────────────────────────────
 class MedicalRegistrationScreen extends StatefulWidget {
-  final String prefilledMobile;
+  final String? prefilledMobile;
 
   const MedicalRegistrationScreen({
     Key? key,
-    this.prefilledMobile = '9876543210',
+    this.prefilledMobile,
   }) : super(key: key);
 
   @override
@@ -142,14 +143,42 @@ class _MedicalRegistrationScreenState
   bool _isPrescriptionRequired  = false;
   bool _isSameDayDelivery       = true;
   bool _isEmergencyDelivery     = false;
+  final _minOrderCtrl           = TextEditingController(text: '99');
+  final _estDeliveryCtrl        = TextEditingController(text: '30 - 45 mins');
 
   // ── Step 8 ──
   bool _agreementAccepted = false;
+  String _userMobile = '';
 
   @override
   void initState() {
     super.initState();
+    _loadUserMobile();
     _loadDraft();
+  }
+
+  Future<void> _loadUserMobile() async {
+    try {
+      String? stored = await AuthService.getPhoneNumber();
+      if (stored == null || stored.trim().isEmpty) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty) {
+          stored = user.phoneNumber!.replaceAll('+91', '').trim();
+        }
+      }
+      if (stored == null || stored.trim().isEmpty) {
+        if (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty) {
+          stored = widget.prefilledMobile;
+        }
+      }
+      if (stored != null && stored.trim().isNotEmpty && mounted) {
+        setState(() {
+          _userMobile = stored!.trim();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user mobile: $e');
+    }
   }
 
   Future<void> _saveDraft() async {
@@ -302,6 +331,7 @@ class _MedicalRegistrationScreenState
       _tradeLicenseCtrl, _panCtrl, _aadhaarCtrl,
       _accountHolderCtrl, _accountNumberCtrl,
       _confirmAccountCtrl, _ifscCtrl, _upiCtrl,
+      _minOrderCtrl, _estDeliveryCtrl,
     ]) {
       c.dispose();
     }
@@ -755,6 +785,19 @@ class _MedicalRegistrationScreenState
       }
     }
 
+    // Step 5 (Bank Details): Cancelled Cheque is Mandatory
+    if (_currentStep == 5) {
+      if (_cancelledChequePath.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please upload Cancelled Cheque or Bank Passbook"),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
+
     if (_currentStep == 7 && !_agreementAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -785,11 +828,16 @@ class _MedicalRegistrationScreenState
           }
 
           final effectiveUid = user?.uid ?? (await AuthService.getActiveBusinessId()) ?? DateTime.now().millisecondsSinceEpoch.toString();
-          final effectiveMobile = (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
-              ? user.phoneNumber!
-              : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
-                  ? widget.prefilledMobile!
-                  : _altMobileCtrl.text.trim();
+          final storedPhone = await AuthService.getPhoneNumber();
+          final effectiveMobile = (storedPhone != null && storedPhone.trim().isNotEmpty)
+              ? storedPhone.trim()
+              : (_userMobile.isNotEmpty)
+                  ? _userMobile
+                  : (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
+                      ? user.phoneNumber!.replaceAll('+91', '').trim()
+                      : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
+                          ? widget.prefilledMobile!
+                          : _altMobileCtrl.text.trim();
 
           // Rule: 1 Number/Account -> Max 3 Businesses (1 Grocery, 1 Restaurant, 1 Medical)
           if (effectiveUid.isNotEmpty) {
@@ -872,65 +920,72 @@ class _MedicalRegistrationScreenState
           await AuthService.saveStoreName(storeName);
           await AuthService.saveBusinessStatus('pending');
 
-          // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE ──
-          final uploadedProfilePhoto = await CloudStorageService.uploadFile(
-            localPath: _profilePhotoPath,
-            destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
-            fallback: _profilePhotoPath,
-          );
+          // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE (IN PARALLEL) ──
+          final uploadResults = await Future.wait([
+            CloudStorageService.uploadFile(
+              localPath: _profilePhotoPath,
+              destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
+              fallback: _profilePhotoPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _medicalLogo,
+              destinationPath: 'businesses/$businessId/branding/logo.jpg',
+              fallback: _medicalLogo,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _medicalBanner,
+              destinationPath: 'businesses/$businessId/branding/banner.jpg',
+              fallback: _medicalBanner,
+            ),
+            CloudStorageService.uploadMultipleFiles(
+              localPaths: _medicalPhotos,
+              destinationFolder: 'businesses/$businessId/photos',
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _drugLicenseCertPath,
+              destinationPath: 'businesses/$businessId/documents/drug_license_cert',
+              fallback: _drugLicenseCertPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _pharmacistCertPath,
+              destinationPath: 'businesses/$businessId/documents/pharmacist_cert',
+              fallback: _pharmacistCertPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _gstCertPath,
+              destinationPath: 'businesses/$businessId/documents/gst_cert',
+              fallback: _gstCertPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _panDocPath,
+              destinationPath: 'businesses/$businessId/documents/pan_doc',
+              fallback: _panDocPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _aadhaarDocPath,
+              destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
+              fallback: _aadhaarDocPath,
+            ),
+            CloudStorageService.uploadFile(
+              localPath: _cancelledChequePath,
+              destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
+              fallback: _cancelledChequePath,
+            ),
+          ]);
 
-          final uploadedLogo = await CloudStorageService.uploadFile(
-            localPath: _medicalLogo,
-            destinationPath: 'businesses/$businessId/branding/logo.jpg',
-            fallback: _medicalLogo,
-          );
+          final uploadedProfilePhoto = uploadResults[0] as String;
+          final uploadedLogo = uploadResults[1] as String;
+          final uploadedBanner = uploadResults[2] as String;
+          final uploadedPhotos = uploadResults[3] as List<String>;
+          final uploadedDrugLicense = uploadResults[4] as String;
+          final uploadedPharmacistCert = uploadResults[5] as String;
+          final uploadedGst = uploadResults[6] as String;
+          final uploadedPan = uploadResults[7] as String;
+          final uploadedAadhaar = uploadResults[8] as String;
+          final uploadedCheque = uploadResults[9] as String;
 
-          final uploadedBanner = await CloudStorageService.uploadFile(
-            localPath: _medicalBanner,
-            destinationPath: 'businesses/$businessId/branding/banner.jpg',
-            fallback: _medicalBanner,
-          );
-
-          final uploadedPhotos = await CloudStorageService.uploadMultipleFiles(
-            localPaths: _medicalPhotos,
-            destinationFolder: 'businesses/$businessId/photos',
-          );
-
-          final uploadedDrugLicense = await CloudStorageService.uploadFile(
-            localPath: _drugLicenseCertPath,
-            destinationPath: 'businesses/$businessId/documents/drug_license_cert',
-            fallback: _drugLicenseCertPath,
-          );
-
-          final uploadedPharmacistCert = await CloudStorageService.uploadFile(
-            localPath: _pharmacistCertPath,
-            destinationPath: 'businesses/$businessId/documents/pharmacist_cert',
-            fallback: _pharmacistCertPath,
-          );
-
-          final uploadedGst = await CloudStorageService.uploadFile(
-            localPath: _gstCertPath,
-            destinationPath: 'businesses/$businessId/documents/gst_cert',
-            fallback: _gstCertPath,
-          );
-
-          final uploadedPan = await CloudStorageService.uploadFile(
-            localPath: _panDocPath,
-            destinationPath: 'businesses/$businessId/documents/pan_doc',
-            fallback: _panDocPath,
-          );
-
-          final uploadedAadhaar = await CloudStorageService.uploadFile(
-            localPath: _aadhaarDocPath,
-            destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
-            fallback: _aadhaarDocPath,
-          );
-
-          final uploadedCheque = await CloudStorageService.uploadFile(
-            localPath: _cancelledChequePath,
-            destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
-            fallback: _cancelledChequePath,
-          );
+          final now = DateTime.now();
+          final formattedDate = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
 
           final businessData = {
             'userId': effectiveUid,
@@ -939,12 +994,23 @@ class _MedicalRegistrationScreenState
             'status': 'pending',
             'isLive': false,
             'createdAt': FieldValue.serverTimestamp(),
+            'publishedAt': FieldValue.serverTimestamp(),
+            'publishedDate': formattedDate,
+            'registrationDate': formattedDate,
+            'submittedAt': FieldValue.serverTimestamp(),
+            'formPublishDate': formattedDate,
+            'agreementAccepted': true,
+            'termsAccepted': true,
+            'agreementAcceptedAt': FieldValue.serverTimestamp(),
+            'agreementStatus': 'accepted',
             'name': _medicalNameCtrl.text.trim().isNotEmpty ? _medicalNameCtrl.text.trim() : 'My Medical Store',
             'medicalName': _medicalNameCtrl.text.trim().isNotEmpty ? _medicalNameCtrl.text.trim() : 'My Medical Store',
             'address': _medicalAddressCtrl.text.trim(),
             'medicalAddress': _medicalAddressCtrl.text.trim(),
             'mobile': effectiveMobile,
             'phoneNumber': effectiveMobile,
+            'ownerPhone': effectiveMobile,
+            'registeredMobile': effectiveMobile,
             'ownerName': _ownerNameCtrl.text.trim(),
             'email': _emailCtrl.text.trim(),
             'altMobile': _altMobileCtrl.text.trim(),
@@ -991,6 +1057,11 @@ class _MedicalRegistrationScreenState
             'isPrescriptionRequired': _isPrescriptionRequired,
             'isSameDayDelivery': _isSameDayDelivery,
             'isEmergencyDelivery': _isEmergencyDelivery,
+            'minOrder': _minOrderCtrl.text.trim(),
+            'minOrderAmount': _minOrderCtrl.text.trim(),
+            'minimumOrderAmount': _minOrderCtrl.text.trim(),
+            'estDelivery': _estDeliveryCtrl.text.trim(),
+            'estimatedDeliveryTime': _estDeliveryCtrl.text.trim(),
           };
 
           // Save to Firestore with timeout and background local cache fallback
@@ -1017,6 +1088,13 @@ class _MedicalRegistrationScreenState
           }
 
           if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🎉 Registration submitted! Opening Dashboard...'),
+                backgroundColor: Color(0xFF15803D),
+                duration: Duration(seconds: 4),
+              ),
+            );
             context.go('/dashboard', extra: businessId);
           }
           return;
@@ -1105,7 +1183,6 @@ class _MedicalRegistrationScreenState
                           _buildStep6(),
                           _buildStep7(),
                           _buildStep8(),
-                          _MedicalSuccessScreen(businessId: _savedBusinessId),
                         ],
                       ),
                     ),
@@ -1154,7 +1231,7 @@ class _MedicalRegistrationScreenState
                 children: [
                   RichText(
                     text: const TextSpan(
-                      children: [
+                       children: [
                         TextSpan(
                           text: 'Cart',
                           style: TextStyle(
@@ -1181,7 +1258,7 @@ class _MedicalRegistrationScreenState
                   ),
                   if (_currentStep < 8)
                     Text(
-                      'Step ${_currentStep + 1} of 9  •  ${_stepTitles[_currentStep]}',
+                      'Step ${_currentStep + 1} of 8  •  ${_stepTitles[_currentStep]}',
                       style: const TextStyle(
                           color: Color(0xFF6B8BAB),
                           fontSize: 11,
@@ -1205,7 +1282,6 @@ class _MedicalRegistrationScreenState
     'Bank Details',
     'Delivery Settings',
     'Agreement',
-    'Success',
   ];
 
   Widget _buildProgressBar(
@@ -1253,7 +1329,7 @@ class _MedicalRegistrationScreenState
             ),
           ),
           LinearProgressIndicator(
-            value: (_currentStep + 1) / 9,
+            value: (_currentStep + 1) / 8,
             backgroundColor: kNavyBlueLight,
             valueColor: const AlwaysStoppedAnimation<Color>(kWhite),
             minHeight: 3,
@@ -1347,7 +1423,7 @@ class _MedicalRegistrationScreenState
           prefixIcon: Icons.badge_outlined,
         ),
         const SizedBox(height: 16),
-        _PrefilledMobileField(mobile: widget.prefilledMobile),
+        _PrefilledMobileField(mobile: _userMobile.isNotEmpty ? _userMobile : (widget.prefilledMobile ?? '')),
         const SizedBox(height: 16),
         CustomTextField(
           controller: _emailCtrl,
@@ -1958,9 +2034,10 @@ class _MedicalRegistrationScreenState
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 20),
-        _SectionLabel(label: 'Cancelled Cheque  (Optional)'),
+        _SectionLabel(label: 'Cancelled Cheque / Passbook *'),
         UploadCard(
-          label: 'Upload Cancelled Cheque',
+          label: 'Upload Cancelled Cheque / Passbook',
+          required: true,
           filePath: _cancelledChequePath,
           onTap: () => _pickDocument(
               (path) => setState(() => _cancelledChequePath = path)),
@@ -2022,6 +2099,24 @@ class _MedicalRegistrationScreenState
               : 'Emergency delivery is currently not available',
           value: _isEmergencyDelivery,
           onChanged: (v) => setState(() => _isEmergencyDelivery = v),
+        ),
+        const SizedBox(height: 20),
+        _SectionLabel(label: 'Order Settings'),
+        CustomTextField(
+          controller: _minOrderCtrl,
+          label: 'Minimum Order Amount',
+          hint: 'e.g. ₹ 99',
+          required: true,
+          prefixIcon: Icons.shopping_bag_outlined,
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 16),
+        CustomTextField(
+          controller: _estDeliveryCtrl,
+          label: 'Estimated Delivery Time',
+          hint: 'e.g. 30 - 45 mins',
+          required: true,
+          prefixIcon: Icons.timer_outlined,
         ),
         const SizedBox(height: 8),
       ],
@@ -2155,298 +2250,6 @@ class _MedicalRegistrationScreenState
         ),
       ),
       child: child!,
-    );
-  }
-}
-
-// ================================================================
-// STEP 9 — MEDICAL SUCCESS SCREEN (StatefulWidget)
-// 5 second loading → fir success + dashboard button
-// ================================================================
-class _MedicalSuccessScreen extends StatefulWidget {
-  final String? businessId;
-  const _MedicalSuccessScreen({this.businessId});
-
-  @override
-  State<_MedicalSuccessScreen> createState() =>
-      _MedicalSuccessScreenState();
-}
-
-class _MedicalSuccessScreenState extends State<_MedicalSuccessScreen> {
-  bool _showLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    Future.delayed(const Duration(seconds: 5), () {
-      if (mounted) {
-        setState(() => _showLoading = false);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_showLoading) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: kBlueAccent,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: kNavyBlue, width: 2.5),
-                ),
-                child: const Icon(
-                  Icons.hourglass_top_rounded,
-                  color: kNavyBlue,
-                  size: 52,
-                ),
-              ),
-              const SizedBox(height: 28),
-              const Text(
-                'Processing Your\nRegistration...',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: kNavyBlueDark,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  height: 1.3,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Please wait while we securely\nsubmit your details.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: kTextSecondary, fontSize: 14, height: 1.55),
-              ),
-              const SizedBox(height: 36),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: kNavyBlueDark,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.schedule_rounded, color: kWhite, size: 32),
-                    SizedBox(width: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Expected Verification Time',
-                          style: TextStyle(
-                              color: Color(0xFF8DA4BF),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          '24 – 48 Hours',
-                          style: TextStyle(
-                              color: kWhite,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.3),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 32),
-              const SizedBox(
-                width: 36,
-                height: 36,
-                child: CircularProgressIndicator(
-                    color: kNavyBlue, strokeWidth: 3),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Submitting your information...',
-                style: TextStyle(
-                    color: kTextSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // ── SUCCESS STATE ──
-    return SingleChildScrollView(
-      physics: const ClampingScrollPhysics(),
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              color: kBlueAccent,
-              shape: BoxShape.circle,
-              border: Border.all(color: kNavyBlue, width: 2.5),
-            ),
-            child: const Icon(Icons.check_circle_rounded,
-                color: kNavyBlue, size: 52),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Registration Completed\nSuccessfully!',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: kNavyBlueDark,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              height: 1.3,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Your medical store is now under review.\nOur team will verify your documents.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                color: kTextSecondary, fontSize: 14, height: 1.55),
-          ),
-          const SizedBox(height: 32),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: kWhite,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: kBorderColor),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                )
-              ],
-            ),
-            child: Column(
-              children: const [
-                _SuccessCheckItem(label: 'Account Created', done: true),
-                SizedBox(height: 14),
-                _SuccessCheckItem(
-                    label: 'Medical Store Details Added', done: true),
-                SizedBox(height: 14),
-                _SuccessCheckItem(
-                    label: 'License Documents Submitted', done: true),
-                SizedBox(height: 14),
-                _SuccessCheckItem(
-                    label: 'Verification Pending',
-                    done: false,
-                    pending: true),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-                color: kNavyBlueDark,
-                borderRadius: BorderRadius.circular(14)),
-            child: Row(
-              children: const [
-                Icon(Icons.schedule_rounded, color: kWhite, size: 30),
-                SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Expected Verification Time',
-                      style: TextStyle(
-                          color: Color(0xFF8DA4BF),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500),
-                    ),
-                    SizedBox(height: 3),
-                    Text(
-                      '24 – 48 Hours',
-                      style: TextStyle(
-                          color: kWhite,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                if (widget.businessId != null) {
-                  context.go('/dashboard', extra: widget.businessId);
-                } else {
-                  context.go('/business-type');
-                }
-              },
-              icon: const Icon(Icons.dashboard_rounded, size: 20),
-              label: const Text(
-                'Go To Dashboard',
-                style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kNavyBlue,
-                foregroundColor: kWhite,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextButton.icon(
-              onPressed: () async {
-                final Uri callUri = Uri(
-                  scheme: 'tel',
-                  path: '+919876543210',
-                );
-
-                if (await canLaunchUrl(callUri)) {
-                  await launchUrl(callUri);
-                }
-              },
-
-              icon: const Icon(
-                Icons.call,
-                color: kNavyBlueLight,
-                size: 18,
-              ),
-
-              label: const Text(
-                'Need help? Contact Partner Support\n+91 98765 43210',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: kNavyBlueLight,
-                  fontWeight: FontWeight.w600,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
-          const SizedBox(height: 24),
-        ],
-      ),
     );
   }
 }
@@ -2727,8 +2530,8 @@ class UploadCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 42,
-              height: 42,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: uploaded ? kNavyBlue.withOpacity(0.15) : kOffWhite,
                 borderRadius: BorderRadius.circular(10),
@@ -2737,13 +2540,30 @@ class UploadCard extends StatelessWidget {
                         ? kNavyBlue.withOpacity(0.3)
                         : kBorderColor),
               ),
-              child: Icon(
-                uploaded
-                    ? Icons.check_circle_outline_rounded
-                    : Icons.upload_file_outlined,
-                color: uploaded ? kNavyBlueDark : kNavyBlue,
-                size: 22,
-              ),
+              child: uploaded && !filePath.toLowerCase().endsWith('.pdf') && getSafeImageProvider(filePath) != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(9),
+                      child: Image(
+                        image: getSafeImageProvider(filePath)!,
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.check_circle_outline_rounded,
+                          color: kNavyBlueDark,
+                          size: 22,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      uploaded
+                          ? (filePath.toLowerCase().endsWith('.pdf')
+                              ? Icons.picture_as_pdf_rounded
+                              : Icons.check_circle_outline_rounded)
+                          : Icons.upload_file_outlined,
+                      color: uploaded ? kNavyBlueDark : kNavyBlue,
+                      size: 22,
+                    ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -3009,17 +2829,33 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Text(label.toUpperCase(),
-              style: const TextStyle(
-                  color: kNavyBlue,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8)),
-          const SizedBox(width: 10),
-          Expanded(child: Container(height: 1, color: kDivider)),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Row(
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: (constraints.maxWidth - 20).clamp(0.0, double.infinity),
+                ),
+                child: Text(
+                  label.toUpperCase(),
+                  style: const TextStyle(
+                    color: kNavyBlue,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Container(height: 1, color: kDivider),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -3102,11 +2938,15 @@ class _ProfilePhotoUpload extends StatelessWidget {
 }
 
 class _PrefilledMobileField extends StatelessWidget {
-  final String mobile;
-  const _PrefilledMobileField({required this.mobile});
+  final String? mobile;
+  const _PrefilledMobileField({this.mobile});
 
   @override
   Widget build(BuildContext context) {
+    final displayMobile = (mobile != null && mobile!.trim().isNotEmpty)
+        ? mobile!.trim()
+        : (FirebaseAuth.instance.currentUser?.phoneNumber?.replaceAll('+91', '').trim() ?? '5555555555');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3149,7 +2989,7 @@ class _PrefilledMobileField extends StatelessWidget {
                   color: kBorderColor,
                   margin: const EdgeInsets.symmetric(horizontal: 12)),
               Expanded(
-                child: Text(mobile,
+                child: Text(displayMobile,
                     style: const TextStyle(
                         color: kTextSecondary,
                         fontSize: 14.5,
