@@ -296,6 +296,18 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     try {
+      // Save phone number immediately
+      await AuthService.savePhoneNumber(phone);
+
+      // Fast verification for test numbers (like 5555555555) or debug mode to prevent 60s Play Integrity delay
+      if (phone == '5555555555' || kDebugMode) {
+        try {
+          await FirebaseAuth.instance.setSettings(appVerificationDisabledForTesting: true);
+        } catch (e) {
+          debugPrint('appVerificationDisabledForTesting note: $e');
+        }
+      }
+
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: _phoneNumber,
         forceResendingToken: forceResend ? _forceResendingToken : null,
@@ -336,7 +348,7 @@ class _LoginScreenState extends State<LoginScreen>
         codeAutoRetrievalTimeout: (verificationId) {
           _verificationId = verificationId;
         },
-        timeout: const Duration(seconds: 60),
+        timeout: const Duration(seconds: 15),
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -392,6 +404,14 @@ class _LoginScreenState extends State<LoginScreen>
     if (user == null) {
       if (mounted) context.go('/login');
       return;
+    }
+
+    final phone = _phoneCtrl.text.trim();
+    if (phone.isNotEmpty) {
+      await AuthService.savePhoneNumber(phone);
+    } else if (user.phoneNumber != null && user.phoneNumber!.isNotEmpty) {
+      final clean = user.phoneNumber!.replaceAll('+91', '').trim();
+      await AuthService.savePhoneNumber(clean);
     }
 
     bool hasPin = await AuthService.isPinSet();

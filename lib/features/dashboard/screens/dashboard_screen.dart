@@ -65,8 +65,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
-  Future<void> _initRealtimeBusiness() async {
-    String? bId = widget.businessId;
+  Future<void> _initRealtimeBusiness({String? overrideId}) async {
+    String? bId = overrideId ?? widget.businessId;
     if (bId == null || bId.isEmpty) {
       bId = await AuthService.getActiveBusinessId();
     }
@@ -236,12 +236,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     else return 'Good evening';
   }
 
-  void _switchBusiness(BusinessModel newBusiness) {
-    if (newBusiness.id == _business.id) return;
+  void _switchBusiness(String newBusinessId) {
+    if (newBusinessId == _business.id) return;
+    _businessSubscription?.cancel();
     setState(() {
-      _business = newBusiness;
+      _isLoading = true;
+      _business = BusinessModel.empty();
     });
-    widget.onBusinessChanged(newBusiness.businessType);
+    _initRealtimeBusiness(overrideId: newBusinessId);
   }
 
   IconData get _businessIcon {
@@ -334,16 +336,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
     
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('businesses')
-          .where('ownerUid', isEqualTo: user.uid)
-          .get();
-          
+      final storedPhone = await AuthService.getPhoneNumber();
+      final userPhone = user.phoneNumber?.replaceAll('+91', '').trim();
+      final effectivePhone = (userPhone != null && userPhone.isNotEmpty) ? userPhone : storedPhone;
+
+      final Map<String, DocumentSnapshot<Map<String, dynamic>>> docMap = {};
+
+      // 1. Query by ownerUid
+      try {
+        final snap1 = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: user.uid)
+            .get();
+        for (var d in snap1.docs) {
+          docMap[d.id] = d;
+        }
+      } catch (e) {
+        debugPrint('Error querying businesses by ownerUid: $e');
+      }
+
+      // 2. Query by userId
+      try {
+        final snap2 = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('userId', isEqualTo: user.uid)
+            .get();
+        for (var d in snap2.docs) {
+          docMap[d.id] = d;
+        }
+      } catch (e) {
+        debugPrint('Error querying businesses by userId: $e');
+      }
+
+      // 3. Query by mobile if available
+      if (effectivePhone != null && effectivePhone.trim().isNotEmpty) {
+        final cleanPhone = effectivePhone.trim();
+        try {
+          final snap3 = await FirebaseFirestore.instance
+              .collection('businesses')
+              .where('mobile', isEqualTo: cleanPhone)
+              .get();
+          for (var d in snap3.docs) {
+            docMap[d.id] = d;
+          }
+        } catch (e) {
+          debugPrint('Error querying businesses by mobile: $e');
+        }
+
+        try {
+          final snap4 = await FirebaseFirestore.instance
+              .collection('businesses')
+              .where('phoneNumber', isEqualTo: cleanPhone)
+              .get();
+          for (var d in snap4.docs) {
+            docMap[d.id] = d;
+          }
+        } catch (e) {
+          debugPrint('Error querying businesses by phoneNumber: $e');
+        }
+      }
+
       if (!mounted) return;
       Navigator.pop(context); // Close loading dialog
       
-      final businesses = snapshot.docs.map((doc) {
-        final data = doc.data();
+      final businesses = docMap.values.map((doc) {
+        final data = doc.data() ?? {};
         return BusinessModel.fromFirestore(data, doc.id);
       }).toList();
       
@@ -354,9 +411,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => _SwitchBusinessSheet(
           businesses: businesses,
           currentBusinessId: _business.id,
-          onSelect: (b) {
+          onSelect: (b) async {
             Navigator.pop(context);
-            context.go('/dashboard', extra: b.id);
+            await AuthService.saveActiveBusinessId(b.id);
+            await AuthService.saveBusinessType(b.type.name);
+            await AuthService.saveStoreName(b.name);
+            await AuthService.saveOwnerName(b.ownerName);
+            await AuthService.saveBusinessStatus(b.status == BusinessStatus.approved ? 'approved' : (b.status == BusinessStatus.rejected ? 'rejected' : 'pending'));
+            widget.onBusinessChanged(b.id);
+            _switchBusiness(b.id);
           },
           onAddNew: () {
             Navigator.pop(context); 
@@ -741,23 +804,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        // Logout TextButton
-                        TextButton(
+                        // Switch Account / Login with Different Number TextButton
+                        TextButton.icon(
                           onPressed: () async {
-                            final hasPin = await AuthService.isPinSet();
-                            if (hasPin) {
-                              if (context.mounted) context.go('/pin-login');
-                            } else {
-                              await FirebaseAuth.instance.signOut();
-                              if (context.mounted) context.go('/login');
+                            await FirebaseAuth.instance.signOut();
+                            await AuthService.clearPin();
+                            if (context.mounted) {
+                              context.go('/login');
                             }
                           },
-                          child: Text(
-                            'Log Out / Exit',
+                          icon: Icon(
+                            LucideIcons.logOut,
+                            size: 15,
+                            color: Colors.white.withOpacity(0.8),
+                          ),
+                          label: Text(
+                            'Switch Account / Login with Different Number',
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.65),
+                              color: Colors.white.withOpacity(0.85),
                               fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                              fontWeight: FontWeight.w600,
+                              decoration: TextDecoration.underline,
                             ),
                           ),
                         ),

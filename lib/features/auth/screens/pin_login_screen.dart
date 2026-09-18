@@ -16,11 +16,15 @@ class PinLoginScreen extends StatefulWidget {
 }
 
 class _PinLoginScreenState extends State<PinLoginScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   // ── State ──────────────────────────────────────────────────────
   String _pin = '';
   String _errorMsg = '';
   bool _loading = false;
+  bool _isAuthenticatingBiometric = false;
+  bool _isPromptScheduled = false;
+  bool _wasAppPaused = false;
+  DateTime? _lastBiometricDismissedAt;
   String _userName = 'Partner';
   DeviceBiometricInfo? _bioInfo;
 
@@ -30,6 +34,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _shakeCtrl = AnimationController(
       vsync: this,
@@ -43,9 +48,43 @@ class _PinLoginScreenState extends State<PinLoginScreen>
     _initBiometric();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _shakeCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _wasAppPaused = true;
+      _isAuthenticatingBiometric = false;
+      _isPromptScheduled = false;
+    } else if (state == AppLifecycleState.resumed) {
+      final wasPaused = _wasAppPaused;
+      _wasAppPaused = false;
+      if (!wasPaused) return;
+
+      // Prevent re-prompt loop if biometric dialog itself was just closed
+      if (_lastBiometricDismissedAt != null &&
+          DateTime.now().difference(_lastBiometricDismissedAt!).inMilliseconds < 1000) {
+        return;
+      }
+
+      // Re-trigger biometric scan immediately when app comes to foreground from background
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && !_loading && _pin.isEmpty) {
+          _isAuthenticatingBiometric = false;
+          _isPromptScheduled = false;
+          _tryBiometric(isAuto: true);
+        }
+      });
+    }
+  }
+
   Future<void> _fetchUserName() async {
     try {
-      // 1. Instant check from local cache
       final cachedName = await AuthService.getOwnerName();
       if (cachedName != null && cachedName.trim().isNotEmpty) {
         if (mounted) {
@@ -59,7 +98,6 @@ class _PinLoginScreenState extends State<PinLoginScreen>
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // 2. Instant check from FirebaseAuth
       final authName = user.displayName?.trim();
       if (authName != null && authName.isNotEmpty) {
         if (mounted) {
@@ -71,7 +109,6 @@ class _PinLoginScreenState extends State<PinLoginScreen>
         return;
       }
 
-      // 3. Fast non-blocking background fetch if no cached name exists
       _fetchUserNameFromFirestoreAsync(user.uid);
     } catch (e) {
       debugPrint('Error fetching user name: $e');
@@ -101,36 +138,50 @@ class _PinLoginScreenState extends State<PinLoginScreen>
             await AuthService.saveActiveBusinessId(businessSnap.docs.first.id);
           }
         }
-      } catch (_) {
-        // Ignored in background
-      }
+      } catch (_) {}
     });
   }
 
   Future<void> _initBiometric() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final isSet = await AuthService.isPinSet();
-      if (!isSet) {
-        await AuthService.syncFromCloud(user.uid);
-      }
-    }
+    // 1. Instant local hardware check
     final info = await AuthService.getDeviceBiometricInfo();
     if (mounted) {
       setState(() {
         _bioInfo = info;
       });
-      // Auto-trigger biometric on screen load instantly if enrolled & enabled
-      if (info.isEnabledByUser && info.isEnrolled) {
-        Future.delayed(const Duration(milliseconds: 100), () => _tryBiometric(isAuto: true));
-      }
+      _triggerBiometricPrompt();
+    }
+
+    // 2. Background cloud sync without delaying biometric prompt
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      AuthService.isPinSet().then((isSet) {
+        if (!isSet) {
+          AuthService.syncFromCloud(user.uid);
+        }
+      });
     }
   }
 
-  @override
-  void dispose() {
-    _shakeCtrl.dispose();
-    super.dispose();
+  void _triggerBiometricPrompt() {
+    if (!mounted || _loading || _isAuthenticatingBiometric || _isPromptScheduled || _pin.isNotEmpty) return;
+    if (_bioInfo == null) {
+      _initBiometric();
+      return;
+    }
+    final info = _bioInfo!;
+    // Automatically trigger biometric unlock if supported or enrolled
+    if (info.isEnrolled || info.isSupported) {
+      _isPromptScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 350), () {
+          _isPromptScheduled = false;
+          if (mounted && !_loading && !_isAuthenticatingBiometric && _pin.isEmpty) {
+            _tryBiometric(isAuto: true);
+          }
+        });
+      });
+    }
   }
 
   // ── Logic ──────────────────────────────────────────────────────
@@ -186,38 +237,49 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   }
 
   Future<void> _tryBiometric({bool isAuto = false}) async {
-    if (_loading) return;
-    HapticFeedback.lightImpact();
-    if (!isAuto) {
-      setState(() {
-        _loading = true;
-        _errorMsg = '';
-      });
-    }
+    if (_loading || _isAuthenticatingBiometric) return;
+    _isAuthenticatingBiometric = true;
 
-    final result = await AuthService.authenticateWithBiometricsDetailed(
-      customReason: _bioInfo?.promptReason,
-    );
-    if (!mounted) return;
-    if (!isAuto) {
-      setState(() => _loading = false);
-    }
+    try {
+      HapticFeedback.lightImpact();
+      if (!isAuto) {
+        setState(() {
+          _loading = true;
+          _errorMsg = '';
+        });
+      }
 
-    if (result.success) {
-      HapticFeedback.mediumImpact();
-      _navigateToDashboard();
-      return;
-    }
+      final result = await AuthService.authenticateWithBiometricsDetailed(
+        customReason: _bioInfo?.promptReason,
+        biometricOnly: true,
+      );
+      if (!mounted) return;
 
-    // Do NOT show error messages for background auto-prompts
-    if (isAuto) return;
+      if (result.success) {
+        await AuthService.setBiometricEnabled(true);
+        HapticFeedback.mediumImpact();
+        _navigateToDashboard();
+        return;
+      }
 
-    if (result.isNotEnrolled || result.isNotAvailable) {
-      _showBiometricNotEnrolledDialog();
-    } else if (result.errorMessage != null && result.errorMessage!.isNotEmpty) {
-      setState(() {
-        _errorMsg = result.errorMessage!;
-      });
+      // If user cancelled or auto-prompt failed, quietly return to PIN entry keypad
+      if (isAuto) return;
+
+      if (result.isNotEnrolled || result.isNotAvailable) {
+        _showBiometricNotEnrolledDialog();
+      } else if (result.errorMessage != null && result.errorMessage!.isNotEmpty) {
+        setState(() {
+          _errorMsg = result.errorMessage!;
+        });
+      }
+    } finally {
+      _lastBiometricDismissedAt = DateTime.now();
+      if (mounted) {
+        setState(() {
+          _isAuthenticatingBiometric = false;
+          if (!isAuto) _loading = false;
+        });
+      }
     }
   }
 
