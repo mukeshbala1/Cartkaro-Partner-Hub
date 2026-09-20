@@ -130,8 +130,9 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
   Future<void> _pickImage(ImageSource source, BuildContext sheetCtx) async {
     Navigator.pop(sheetCtx);
     try {
-      final XFile? picked = await _picker.pickImage(source: source, imageQuality: 80, maxWidth: 1000);
+      final XFile? picked = await _picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
       if (picked != null) {
+        if (!mounted) return;
         setState(() => _attachments.add(File(picked.path)));
       }
     } catch (e) {

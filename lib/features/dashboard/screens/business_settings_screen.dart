@@ -552,8 +552,9 @@ class _UpdateImagesSheetState extends State<_UpdateImagesSheet> {
   Future<void> _fromSource(ImageSource source, String type, BuildContext sheetCtx) async {
     Navigator.pop(sheetCtx);
     try {
-      final XFile? picked = await _picker.pickImage(source: source, imageQuality: 85, maxWidth: 1200);
+      final XFile? picked = await _picker.pickImage(source: source, imageQuality: 85, maxWidth: 1200, maxHeight: 1200);
       if (picked != null) {
+        if (!mounted) return;
         setState(() {
           if (type == 'banner') {
             _banner = File(picked.path);

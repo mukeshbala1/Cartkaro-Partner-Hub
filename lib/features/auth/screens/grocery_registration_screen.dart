@@ -642,8 +642,9 @@ class _GroceryRegistrationScreenState
       ImageSource source, ValueChanged<String> onPathUpdated) async {
     final picker = ImagePicker();
     final pickedFile =
-        await picker.pickImage(source: source, imageQuality: 80);
+        await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
     if (pickedFile != null) {
+      if (!mounted) return;
       setState(() => onPathUpdated(pickedFile.path));
     }
   }
@@ -654,6 +655,7 @@ class _GroceryRegistrationScreenState
       allowedExtensions: ['jpg', 'png', 'pdf'],
     );
     if (result != null && result.files.single.path != null) {
+      if (!mounted) return;
       setState(() => onPathUpdated(result.files.single.path!));
     }
   }
@@ -1532,9 +1534,9 @@ class _GroceryRegistrationScreenState
           logoLabel: 'Store Logo *',
           bannerLabel: 'Store Banner *',
           onLogoTap: () =>
-              _pickImage(ImageSource.gallery, (path) => _storeLogoPath = path),
-          onBannerTap: () => _pickImage(
-              ImageSource.gallery, (path) => _storeBannerPath = path),
+              _showImagePickerOptions((path) => _storeLogoPath = path),
+          onBannerTap: () => _showImagePickerOptions(
+              (path) => _storeBannerPath = path),
         ),
         const SizedBox(height: 16),
         _SectionLabel(label: 'Store Photos (Required at least 1) *'),

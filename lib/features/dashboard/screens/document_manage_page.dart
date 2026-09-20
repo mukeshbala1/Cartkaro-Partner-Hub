@@ -128,7 +128,10 @@ class _DocumentManagePageState extends State<DocumentManagePage> {
                       final file = await picker.pickImage(
                         source: ImageSource.camera,
                         imageQuality: 80,
+                        maxWidth: 1200,
+                        maxHeight: 1200,
                       );
+                      if (!mounted) return;
                       setSheet(() {
                         selectedPath = file?.path;
                       });
@@ -144,6 +147,7 @@ class _DocumentManagePageState extends State<DocumentManagePage> {
                         type: FileType.custom,
                         allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
                       );
+                      if (!mounted) return;
                       setSheet(() {
                         selectedPath = result?.files.single.path;
                       });

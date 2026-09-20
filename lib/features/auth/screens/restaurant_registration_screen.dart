@@ -603,8 +603,9 @@ class _RestaurantRegistrationScreenState
       ImageSource source, ValueChanged<String> onPathUpdated) async {
     final picker = ImagePicker();
     final pickedFile =
-        await picker.pickImage(source: source, imageQuality: 80);
+        await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
     if (pickedFile != null) {
+      if (!mounted) return;
       setState(() => onPathUpdated(pickedFile.path));
     }
   }
@@ -615,6 +616,7 @@ class _RestaurantRegistrationScreenState
       allowedExtensions: ['jpg', 'png', 'pdf'],
     );
     if (result != null && result.files.single.path != null) {
+      if (!mounted) return;
       setState(() => onPathUpdated(result.files.single.path!));
     }
   }
@@ -1490,10 +1492,10 @@ class _RestaurantRegistrationScreenState
           bannerPath: _restaurantBannerPath,
           logoLabel: 'Restaurant Logo *',
           bannerLabel: 'Restaurant Banner *',
-          onLogoTap: () => _pickImage(
-              ImageSource.gallery, (path) => setState(() => _restaurantLogoPath = path)),
-          onBannerTap: () => _pickImage(
-              ImageSource.gallery, (path) => setState(() => _restaurantBannerPath = path)),
+          onLogoTap: () => _showImagePickerOptions(
+              (path) => setState(() => _restaurantLogoPath = path)),
+          onBannerTap: () => _showImagePickerOptions(
+              (path) => setState(() => _restaurantBannerPath = path)),
         ),
         const SizedBox(height: 16),
         _SectionLabel(label: 'Restaurant Photos (Required at least 1) *'),

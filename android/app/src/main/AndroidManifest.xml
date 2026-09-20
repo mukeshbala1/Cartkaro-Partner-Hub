@@ -5,8 +5,6 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
-    <!-- Camera & Media — required by image_picker -->
-    <uses-permission android:name="android.permission.CAMERA"/>
     <!-- Android 13+ uses READ_MEDIA_IMAGES instead of READ_EXTERNAL_STORAGE -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <!-- Android 12 and below -->
@@ -36,12 +34,24 @@
             <data android:mimeType="text/plain"/>
         </intent>
 
+        <!-- Camera / Image Capture -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+
+        <!-- Maps / Geo Intents -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+
     </queries>
 
 
     <application
         android:label="cartkaro_partner_hub"
         android:name="${applicationName}"
+        android:largeHeap="true"
         android:icon="@mipmap/ic_launcher">
 
         <activity

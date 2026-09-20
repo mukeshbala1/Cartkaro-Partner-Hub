@@ -659,8 +659,9 @@ class _MedicalRegistrationScreenState
       ImageSource source, ValueChanged<String> onPathUpdated) async {
     final picker = ImagePicker();
     final pickedFile =
-        await picker.pickImage(source: source, imageQuality: 80);
+        await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
     if (pickedFile != null) {
+      if (!mounted) return;
       setState(() => onPathUpdated(pickedFile.path));
     }
   }
@@ -671,6 +672,7 @@ class _MedicalRegistrationScreenState
       allowedExtensions: ['jpg', 'png', 'pdf'],
     );
     if (result != null && result.files.single.path != null) {
+      if (!mounted) return;
       setState(() => onPathUpdated(result.files.single.path!));
     }
   }
@@ -1558,10 +1560,10 @@ class _MedicalRegistrationScreenState
           bannerPath: _medicalBanner,
           logoLabel: 'Medical Store Logo *',
           bannerLabel: 'Medical Store Banner *',
-          onLogoTap: () => _pickImage(
-              ImageSource.gallery, (path) => setState(() => _medicalLogo = path)),
-          onBannerTap: () => _pickImage(
-              ImageSource.gallery, (path) => setState(() => _medicalBanner = path)),
+          onLogoTap: () => _showImagePickerOptions(
+              (path) => setState(() => _medicalLogo = path)),
+          onBannerTap: () => _showImagePickerOptions(
+              (path) => setState(() => _medicalBanner = path)),
         ),
         const SizedBox(height: 16),
         _SectionLabel(label: 'Medical Store Photos (Required at least 1) *'),
