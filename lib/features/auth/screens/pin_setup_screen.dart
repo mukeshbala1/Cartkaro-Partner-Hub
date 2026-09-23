@@ -262,11 +262,11 @@ class _PinSetupScreenState extends State<PinSetupScreen>
 
         if (!mounted) return;
         if (snap.docs.isEmpty) {
-          if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
-            context.go('/dashboard', extra: savedBusinessId);
-          } else {
-            context.go('/business-type');
-          }
+          await AuthService.saveActiveBusinessId('');
+          await AuthService.saveBusinessStatus('');
+          await AuthService.saveStoreName('');
+          await AuthService.saveBusinessType('');
+          context.go('/business-type');
         } else if (snap.docs.length == 1) {
           final bId = snap.docs.first.id;
           await AuthService.saveActiveBusinessId(bId);
@@ -278,11 +278,7 @@ class _PinSetupScreenState extends State<PinSetupScreen>
       } catch (firestoreError) {
         debugPrint('Firestore query in PIN setup handled: $firestoreError');
         if (!mounted) return;
-        if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
-          context.go('/dashboard', extra: savedBusinessId);
-        } else {
-          context.go('/business-type');
-        }
+        context.go('/business-type');
       }
     } catch (e) {
       debugPrint('Error after PIN setup: $e');

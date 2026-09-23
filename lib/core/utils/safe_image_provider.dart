@@ -38,9 +38,12 @@ class SafeImageWidget extends StatelessWidget {
   final double? width;
   final double? height;
   final BoxFit fit;
+  final Alignment alignment;
   final Widget? placeholder;
   final Widget? errorWidget;
   final Key? imageKey;
+  final int? cacheWidth;
+  final int? cacheHeight;
 
   const SafeImageWidget({
     super.key,
@@ -48,9 +51,12 @@ class SafeImageWidget extends StatelessWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
     this.placeholder,
     this.errorWidget,
     this.imageKey,
+    this.cacheWidth,
+    this.cacheHeight,
   });
 
   @override
@@ -59,11 +65,11 @@ class SafeImageWidget extends StatelessWidget {
         Container(
           width: width,
           height: height,
-          color: AppColors.kPrimary.withOpacity(0.07),
+          color: AppColors.kPrimary.withValues(alpha: 0.07),
           child: Center(
             child: Icon(
               LucideIcons.image,
-              color: AppColors.kPrimary.withOpacity(0.4),
+              color: AppColors.kPrimary.withValues(alpha: 0.4),
               size: (width != null && width! < 40) ? 16 : 24,
             ),
           ),
@@ -75,6 +81,16 @@ class SafeImageWidget extends StatelessWidget {
 
     final path = imagePath!.trim();
 
+    // To preserve the natural aspect ratio of images during decoding,
+    // Flutter must NEVER have both cacheWidth and cacheHeight specified simultaneously
+    // unless explicitly requested by the caller.
+    // Specifying only cacheWidth causes Flutter to proportionally scale height without warping/distortion.
+    final int? effectiveCacheWidth = cacheWidth ??
+        (cacheHeight != null
+            ? null
+            : (width != null ? (width! * 3).round().clamp(600, 2048) : 1024));
+    final int? effectiveCacheHeight = cacheHeight;
+
     if (path.startsWith('assets/') || path.startsWith('assets')) {
       return Image.asset(
         path,
@@ -82,6 +98,9 @@ class SafeImageWidget extends StatelessWidget {
         width: width,
         height: height,
         fit: fit,
+        alignment: alignment,
+        cacheWidth: effectiveCacheWidth,
+        cacheHeight: effectiveCacheHeight,
         errorBuilder: (context, error, stackTrace) => defaultFallback,
       );
     }
@@ -93,6 +112,9 @@ class SafeImageWidget extends StatelessWidget {
         width: width,
         height: height,
         fit: fit,
+        alignment: alignment,
+        cacheWidth: effectiveCacheWidth,
+        cacheHeight: effectiveCacheHeight,
         errorBuilder: (context, error, stackTrace) => defaultFallback,
       );
     }
@@ -105,6 +127,9 @@ class SafeImageWidget extends StatelessWidget {
           width: width,
           height: height,
           fit: fit,
+          alignment: alignment,
+          cacheWidth: effectiveCacheWidth,
+          cacheHeight: effectiveCacheHeight,
           errorBuilder: (context, error, stackTrace) => defaultFallback,
         );
       }
@@ -125,6 +150,9 @@ class SafeImageWidget extends StatelessWidget {
             width: width,
             height: height,
             fit: fit,
+            alignment: alignment,
+            cacheWidth: effectiveCacheWidth,
+            cacheHeight: effectiveCacheHeight,
             errorBuilder: (context, error, stackTrace) => defaultFallback,
           );
         }
@@ -134,3 +162,4 @@ class SafeImageWidget extends StatelessWidget {
     return defaultFallback;
   }
 }
+

@@ -229,14 +229,16 @@ class _AddProductScreenState extends State<AddProductScreen> {
   Future<void> _pickImage(ImageSource source) async {
     try {
       if (source == ImageSource.gallery) {
-        final List<XFile> selectedImages = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
+        final List<XFile> selectedImages = await _picker.pickMultiImage(imageQuality: 75, maxWidth: 1024, maxHeight: 1024);
         if (selectedImages.isNotEmpty) {
+          PaintingBinding.instance.imageCache.clearLiveImages();
           if (!mounted) return;
           setState(() { _images.addAll(selectedImages); });
         }
       } else {
-        final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
+        final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 75, maxWidth: 1024, maxHeight: 1024);
         if (photo != null) {
+          PaintingBinding.instance.imageCache.clearLiveImages();
           if (!mounted) return;
           setState(() { _images.add(photo); });
         }

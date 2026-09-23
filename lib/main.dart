@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'core/routes/app_router.dart';
 import 'core/services/auth_service.dart';
+import 'core/utils/image_picker_helper.dart';
 
 import 'firebase_options.dart';
 
@@ -53,13 +54,20 @@ class _CartKaroPartnerAppState extends State<CartKaroPartnerApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      _pausedTime ??= DateTime.now();
+      if (!ImagePickerHelper.isPickingMedia) {
+        _pausedTime ??= DateTime.now();
+      }
     } else if (state == AppLifecycleState.resumed) {
+      if (ImagePickerHelper.isPickingMedia) {
+        _pausedTime = null;
+        return;
+      }
       final paused = _pausedTime;
       _pausedTime = null;
       if (paused != null) {
-        final diff = DateTime.now().difference(paused).inMilliseconds;
-        if (diff > 300) {
+        final diffInSeconds = DateTime.now().difference(paused).inSeconds;
+        // Only lock if app was genuinely in background for over 60 seconds
+        if (diffInSeconds >= 60) {
           _checkAndLockApp();
         }
       }
@@ -68,6 +76,8 @@ class _CartKaroPartnerAppState extends State<CartKaroPartnerApp>
 
   Future<void> _checkAndLockApp() async {
     try {
+      if (ImagePickerHelper.isPickingMedia) return;
+
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
@@ -80,6 +90,8 @@ class _CartKaroPartnerAppState extends State<CartKaroPartnerApp>
           location.startsWith('/splash') ||
           location.startsWith('/pin-setup') ||
           location.startsWith('/reset-pin') ||
+          location.startsWith('/business-type') ||
+          location.startsWith('/business-selector') ||
           location.startsWith('/register')) {
         return;
       }

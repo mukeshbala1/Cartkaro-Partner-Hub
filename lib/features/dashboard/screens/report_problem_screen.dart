@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../../core/utils/image_picker_helper.dart';
 
 class _Palette {
   static const Color primary       = Color.fromARGB(255, 34, 53, 84);
@@ -130,10 +131,15 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> {
   Future<void> _pickImage(ImageSource source, BuildContext sheetCtx) async {
     Navigator.pop(sheetCtx);
     try {
-      final XFile? picked = await _picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
-      if (picked != null) {
+      final String? path = await ImagePickerHelper.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 75,
+      );
+      if (path != null && path.isNotEmpty) {
         if (!mounted) return;
-        setState(() => _attachments.add(File(picked.path)));
+        setState(() => _attachments.add(File(path)));
       }
     } catch (e) {
       _showSnack('Could not attach photo: $e');

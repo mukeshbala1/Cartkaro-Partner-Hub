@@ -354,37 +354,47 @@ class _PinLoginScreenState extends State<PinLoginScreen>
       return;
     }
 
-    // 1. Instant navigation if we already have a cached business ID
-    final savedBusinessId = await AuthService.getActiveBusinessId();
-    if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
-      if (mounted) context.go('/dashboard', extra: savedBusinessId);
-      return;
-    }
-
-    // 2. Otherwise quickly check Firestore
     if (mounted) {
       setState(() => _loading = true);
     }
+
     try {
       final snap = await FirebaseFirestore.instance
           .collection('businesses')
           .where('ownerUid', isEqualTo: user.uid)
           .get()
-          .timeout(const Duration(seconds: 2));
+          .timeout(const Duration(seconds: 4));
 
       if (!mounted) return;
+
       if (snap.docs.isEmpty) {
+        // User has NO businesses in Firestore! Clear any stale cached IDs and route to registration
+        await AuthService.saveActiveBusinessId('');
+        await AuthService.saveBusinessStatus('');
+        await AuthService.saveStoreName('');
+        await AuthService.saveBusinessType('');
         context.go('/business-type');
       } else if (snap.docs.length == 1) {
         final bId = snap.docs.first.id;
         await AuthService.saveActiveBusinessId(bId);
         if (mounted) context.go('/dashboard', extra: bId);
       } else {
-        context.go('/business-selector');
+        final savedBusinessId = await AuthService.getActiveBusinessId();
+        final matches = snap.docs.where((d) => d.id == savedBusinessId).toList();
+        if (matches.isNotEmpty) {
+          if (mounted) context.go('/dashboard', extra: savedBusinessId);
+        } else {
+          if (mounted) context.go('/business-selector');
+        }
       }
     } catch (e) {
-      debugPrint('Quick business check error: $e');
-      if (mounted) context.go('/business-type');
+      debugPrint('Business check error in PIN login: $e');
+      final savedBusinessId = await AuthService.getActiveBusinessId();
+      if (savedBusinessId != null && savedBusinessId.isNotEmpty) {
+        if (mounted) context.go('/dashboard', extra: savedBusinessId);
+      } else {
+        if (mounted) context.go('/business-type');
+      }
     }
   }
 

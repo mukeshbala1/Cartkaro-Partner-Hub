@@ -66,165 +66,166 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _initRealtimeBusiness({String? overrideId}) async {
+    setState(() => _isLoading = true);
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) context.go('/login');
+      return;
+    }
+
     String? bId = overrideId ?? widget.businessId;
     if (bId == null || bId.isEmpty) {
       bId = await AuthService.getActiveBusinessId();
     }
 
-    if (bId == null || bId.isEmpty) {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        try {
-          final snap = await FirebaseFirestore.instance
-              .collection('businesses')
-              .where('ownerUid', isEqualTo: user.uid)
-              .limit(1)
-              .get(const GetOptions(source: Source.serverAndCache))
-              .timeout(const Duration(seconds: 3));
+    // 1. Verify and resolve business directly against Firestore
+    try {
+      DocumentSnapshot<Map<String, dynamic>>? doc;
 
-          if (snap.docs.isNotEmpty) {
-            bId = snap.docs.first.id;
-          }
-        } catch (e) {
-          debugPrint('Error finding business for user: $e');
+      if (bId != null && bId.isNotEmpty) {
+        try {
+          doc = await FirebaseFirestore.instance
+              .collection('businesses')
+              .doc(bId)
+              .get()
+              .timeout(const Duration(seconds: 4));
+        } catch (docErr) {
+          debugPrint('Error getting doc $bId: $docErr');
         }
       }
-    }
 
-    // Read local cache immediately to ensure instantaneous correct business type, name, & pending status
-    final cachedType = await AuthService.getBusinessType();
-    final cachedName = await AuthService.getStoreName();
-    final cachedOwner = await AuthService.getOwnerName();
-    final cachedStatus = await AuthService.getBusinessStatus();
+      // If specific doc doesn't exist in Firestore, search user's businesses
+      if (doc == null || !doc.exists || doc.data() == null) {
+        final snap = await FirebaseFirestore.instance
+            .collection('businesses')
+            .where('ownerUid', isEqualTo: user.uid)
+            .get()
+            .timeout(const Duration(seconds: 4));
 
-    BusinessType resolvedType = BusinessType.restaurant;
-    if (cachedType == 'grocery') resolvedType = BusinessType.grocery;
-    if (cachedType == 'medical') resolvedType = BusinessType.medical;
+        if (snap.docs.isEmpty) {
+          // NO BUSINESS DATA IN FIRESTORE!
+          // Clear stale local cached keys and route to registration
+          await AuthService.saveActiveBusinessId('');
+          await AuthService.saveBusinessStatus('');
+          await AuthService.saveStoreName('');
+          await AuthService.saveBusinessType('');
 
-    BusinessStatus resolvedStatus = BusinessStatus.pending;
-    if (cachedStatus == 'approved') resolvedStatus = BusinessStatus.approved;
-    if (cachedStatus == 'rejected') resolvedStatus = BusinessStatus.rejected;
+          if (mounted) {
+            context.go('/business-type');
+          }
+          return;
+        }
 
-    if (mounted) {
+        // Found real business for this user
+        doc = snap.docs.first;
+        bId = doc.id;
+        await AuthService.saveActiveBusinessId(bId);
+      }
+
+      if (!mounted) return;
+
+      final parsed = BusinessModel.fromFirestore(doc.data()!, doc.id);
       setState(() {
-        _business = BusinessModel.empty(
-          id: bId ?? '',
-          name: (cachedName != null && cachedName.isNotEmpty)
-              ? cachedName
-              : (resolvedType == BusinessType.restaurant
-                  ? 'My Restaurant'
-                  : resolvedType == BusinessType.medical
-                      ? 'My Medical Store'
-                      : 'My Grocery Store'),
-          type: resolvedType,
-          status: resolvedStatus,
-          ownerName: cachedOwner,
-        );
+        _business = parsed;
         _isLoading = false;
       });
       widget.onBusinessChanged(_business.businessType);
-    }
 
-    if (bId == null || bId.isEmpty) {
-      return;
-    }
-
-    // Ensure an authenticated user session for Firestore read permissions
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      try {
-        await FirebaseAuth.instance.signInAnonymously().timeout(const Duration(seconds: 4));
-      } catch (authErr) {
-        debugPrint('Auth fallback note in dashboard: $authErr');
+      if (_business.displayName.isNotEmpty) {
+        await AuthService.saveStoreName(_business.displayName);
       }
-    }
+      if (_business.ownerName.isNotEmpty) {
+        await AuthService.saveOwnerName(_business.ownerName);
+      }
+      if (_business.businessType.isNotEmpty) {
+        await AuthService.saveBusinessType(_business.businessType);
+      }
+      await AuthService.saveBusinessStatus(
+        _business.status == BusinessStatus.approved
+            ? 'approved'
+            : (_business.status == BusinessStatus.rejected ? 'rejected' : 'pending'),
+      );
 
-    // 1. Quick fetch from cache or server
-    try {
-      final doc = await FirebaseFirestore.instance
+      // 2. Setup REAL-TIME listener for live updates from Firebase
+      await _businessSubscription?.cancel();
+      _businessSubscription = FirebaseFirestore.instance
           .collection('businesses')
           .doc(bId)
-          .get(const GetOptions(source: Source.serverAndCache))
-          .timeout(const Duration(seconds: 4));
+          .snapshots()
+          .listen(
+        (snapshot) async {
+          if (!snapshot.exists || snapshot.data() == null) {
+            // Document was deleted or does not exist in Firestore!
+            debugPrint('Business document $bId no longer exists in Firestore.');
+            try {
+              final checkSnap = await FirebaseFirestore.instance
+                  .collection('businesses')
+                  .where('ownerUid', isEqualTo: user.uid)
+                  .get();
 
-      if (doc.exists && doc.data() != null && mounted) {
-        final parsed = BusinessModel.fromFirestore(doc.data()!, doc.id);
-        setState(() {
-          _business = parsed;
-          _isLoading = false;
-        });
-        widget.onBusinessChanged(_business.businessType);
-        if (_business.displayName.isNotEmpty) {
-          await AuthService.saveStoreName(_business.displayName);
-        }
-        if (_business.ownerName.isNotEmpty) {
-          await AuthService.saveOwnerName(_business.ownerName);
-        }
-        if (_business.businessType.isNotEmpty) {
-          await AuthService.saveBusinessType(_business.businessType);
-        }
-      } else if (mounted) {
-        setState(() => _isLoading = false);
-      }
+              if (checkSnap.docs.isEmpty) {
+                await AuthService.saveActiveBusinessId('');
+                await AuthService.saveBusinessStatus('');
+                if (mounted) context.go('/business-type');
+              } else if (mounted) {
+                context.go('/business-selector');
+              }
+            } catch (_) {
+              if (mounted) context.go('/business-type');
+            }
+            return;
+          }
+          if (!mounted) return;
+          final updatedBusiness = BusinessModel.fromFirestore(snapshot.data()!, snapshot.id);
+          final wasPending = _business.status == BusinessStatus.pending;
+          final isNowApproved = updatedBusiness.status == BusinessStatus.approved;
+
+          setState(() {
+            _business = updatedBusiness;
+            _isLoading = false;
+          });
+          widget.onBusinessChanged(_business.businessType);
+          if (_business.displayName.isNotEmpty) {
+            await AuthService.saveStoreName(_business.displayName);
+          }
+          if (_business.ownerName.isNotEmpty) {
+            await AuthService.saveOwnerName(_business.ownerName);
+          }
+          if (_business.businessType.isNotEmpty) {
+            await AuthService.saveBusinessType(_business.businessType);
+          }
+          await AuthService.saveBusinessStatus(
+            updatedBusiness.status == BusinessStatus.approved
+                ? 'approved'
+                : updatedBusiness.status == BusinessStatus.rejected
+                    ? 'rejected'
+                    : 'pending',
+          );
+
+          if (wasPending && isNowApproved && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                backgroundColor: Color(0xFF059669),
+                duration: Duration(seconds: 4),
+                content: Text('🎉 Congratulations! Your account has been verified and approved by admin. Full access unlocked!'),
+              ),
+            );
+          }
+        },
+        onError: (err) {
+          debugPrint('Real-time Firestore stream error: $err');
+          if (mounted && _isLoading) {
+            setState(() => _isLoading = false);
+          }
+        },
+      );
     } catch (e) {
-      debugPrint('Initial business doc read: $e');
+      debugPrint('Initial business doc read error: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
-
-    // 2. Setup REAL-TIME listener for live updates from Firebase
-    await _businessSubscription?.cancel();
-    _businessSubscription = FirebaseFirestore.instance
-        .collection('businesses')
-        .doc(bId)
-        .snapshots()
-        .listen(
-      (snapshot) async {
-        if (!snapshot.exists || snapshot.data() == null) {
-          if (mounted && _isLoading) setState(() => _isLoading = false);
-          return;
-        }
-        if (!mounted) return;
-        final updatedBusiness = BusinessModel.fromFirestore(snapshot.data()!, snapshot.id);
-        final wasPending = _business.status == BusinessStatus.pending;
-        final isNowApproved = updatedBusiness.status == BusinessStatus.approved;
-
-        setState(() {
-          _business = updatedBusiness;
-          _isLoading = false;
-        });
-        widget.onBusinessChanged(_business.businessType);
-        if (_business.displayName.isNotEmpty) {
-          await AuthService.saveStoreName(_business.displayName);
-        }
-        if (_business.ownerName.isNotEmpty) {
-          await AuthService.saveOwnerName(_business.ownerName);
-        }
-        if (_business.businessType.isNotEmpty) {
-          await AuthService.saveBusinessType(_business.businessType);
-        }
-        await AuthService.saveBusinessStatus(
-          updatedBusiness.status == BusinessStatus.approved ? 'approved' : updatedBusiness.status == BusinessStatus.rejected ? 'rejected' : 'pending',
-        );
-
-        if (wasPending && isNowApproved && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Color(0xFF059669),
-              duration: Duration(seconds: 4),
-              content: Text('🎉 Congratulations! Your account has been verified and approved by admin. Full access unlocked!'),
-            ),
-          );
-        }
-      },
-      onError: (err) {
-        debugPrint('Real-time Firestore stream error: $err');
-        if (mounted && _isLoading) {
-          setState(() => _isLoading = false);
-        }
-      },
-    );
   }
 
   String get itemName => _business.itemName;
@@ -923,18 +924,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Row(
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(_businessIcon, size: 14, color: AppColors.kPrimary),
                     const SizedBox(width: 6),
-                    Text('$_greeting 👋', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.kPrimary, letterSpacing: 0.2)),
+                    Flexible(
+                      child: Text(
+                        '$_greeting 👋',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.kPrimary, letterSpacing: 0.2),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4), 
@@ -943,7 +952,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Flexible(child: Text(_business.displayName, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: AppColors.kDarkText, letterSpacing: -0.3), overflow: TextOverflow.ellipsis)),
+                      Flexible(child: Text(_business.displayName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.kDarkText, letterSpacing: -0.3), overflow: TextOverflow.ellipsis)),
                       const SizedBox(width: 4),
                       const Icon(LucideIcons.chevronDown, size: 16, color: AppColors.kDarkText), 
                     ],
@@ -952,16 +961,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-          const SizedBox(width: 10), 
+          const SizedBox(width: 8), 
           _buildOnlineToggle(),
           const SizedBox(width: 8),
           PopupMenuButton<String>(
             offset: const Offset(0, 45),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: CircleAvatar(
-              radius: 18,
+              radius: 17,
               backgroundColor: AppColors.kPrimary.withOpacity(0.15),
-              child: const Icon(LucideIcons.user, size: 20, color: AppColors.kPrimary),
+              child: const Icon(LucideIcons.user, size: 18, color: AppColors.kPrimary),
             ),
             onSelected: (value) async {
               if (value == 'profile') {
@@ -1015,8 +1024,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final bool isLive = _business.isLive;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(color: AppColors.kPrimary.withOpacity(0.08), borderRadius: BorderRadius.circular(30), border: Border.all(color: AppColors.kPrimary.withOpacity(0.2))),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.kPrimary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: AppColors.kPrimary.withOpacity(0.2)),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1024,10 +1037,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(width: 7, height: 7, child: CircularProgressIndicator(strokeWidth: 1.4, valueColor: AlwaysStoppedAnimation(AppColors.kPrimary)))
           else
             Container(width: 7, height: 7, decoration: BoxDecoration(color: isLive ? AppColors.kPrimary : AppColors.kLightText, shape: BoxShape.circle, boxShadow: isLive ? [BoxShadow(color: AppColors.kPrimary.withOpacity(0.5), blurRadius: 4, spreadRadius: 1)] : null)),
-          const SizedBox(width: 7),
-          Text(isLive ? 'Live' : 'Unlive', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: isLive ? AppColors.kPrimary : AppColors.kLightText, letterSpacing: 0.3)),
-          const SizedBox(width: 6),
-          SizedBox(height: 24, child: Transform.scale(scale: 0.75, child: Switch(value: isLive, onChanged: _isTogglingLive ? null : _onLiveToggleChanged, activeColor: Colors.white, activeTrackColor: AppColors.kPrimary, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap))),
+          const SizedBox(width: 5),
+          Text(isLive ? 'Live' : 'Off', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: isLive ? AppColors.kPrimary : AppColors.kLightText, letterSpacing: 0.2)),
+          const SizedBox(width: 3),
+          SizedBox(
+            height: 20,
+            child: Transform.scale(
+              scale: 0.7,
+              child: Switch(
+                value: isLive,
+                onChanged: _isTogglingLive ? null : _onLiveToggleChanged,
+                activeColor: Colors.white,
+                activeTrackColor: AppColors.kPrimary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
         ],
       ),
     );

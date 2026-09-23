@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
+import '../../../core/utils/image_picker_helper.dart';
 import '../../../models/business_model.dart';
 
 enum _DocAction { upload, update }
@@ -124,16 +125,15 @@ class _DocumentManagePageState extends State<DocumentManagePage> {
                     title: "Take Photo",
                     subtitle: "Use camera to scan document",
                     onTap: () async {
-                      final picker = ImagePicker();
-                      final file = await picker.pickImage(
+                      final path = await ImagePickerHelper.pickImage(
                         source: ImageSource.camera,
-                        imageQuality: 80,
-                        maxWidth: 1200,
-                        maxHeight: 1200,
+                        maxWidth: 1024,
+                        maxHeight: 1024,
+                        imageQuality: 75,
                       );
                       if (!mounted) return;
                       setSheet(() {
-                        selectedPath = file?.path;
+                        selectedPath = path;
                       });
                     },
                   ),

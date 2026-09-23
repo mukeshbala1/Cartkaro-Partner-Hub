@@ -26,6 +26,9 @@ import '../../../core/utils/safe_image_provider.dart';
 import '../widgets/web_wizard_layout.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/cloud_storage_service.dart';
+import '../../../core/utils/image_picker_helper.dart';
+import '../../../core/services/razorpay_verification_service.dart';
+import '../widgets/bank_verification_card.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 // ─────────────────────────────────────────
@@ -137,6 +140,10 @@ class _MedicalRegistrationScreenState
   final _upiCtrl            = TextEditingController();
   String _selectedBank        = '';
   String _cancelledChequePath = '';
+  IfscDetailsResult? _ifscDetails;
+  bool _isIfscLoading = false;
+  BankVerificationResult? _bankVerificationResult;
+  bool _isVerifyingBank = false;
 
   // ── Step 7 ──
   String _deliveryOption        = 'cartkaro';
@@ -153,8 +160,120 @@ class _MedicalRegistrationScreenState
   @override
   void initState() {
     super.initState();
+    _ifscCtrl.addListener(_onIfscChanged);
+    _accountNumberCtrl.addListener(_onAccountDetailsChanged);
+    _confirmAccountCtrl.addListener(_onAccountDetailsChanged);
+    _accountHolderCtrl.addListener(_onAccountDetailsChanged);
+    _checkLostCameraData();
     _loadUserMobile();
     _loadDraft();
+  }
+
+  void _onAccountDetailsChanged() {
+    if (_bankVerificationResult != null) {
+      if (_bankVerificationResult!.accountNumber != _accountNumberCtrl.text.trim() ||
+          _bankVerificationResult!.ifsc != _ifscCtrl.text.trim().toUpperCase() ||
+          _bankVerificationResult!.registeredName != _accountHolderCtrl.text.trim().toUpperCase()) {
+        setState(() {
+          _bankVerificationResult = null;
+        });
+      }
+    }
+  }
+
+  void _onIfscChanged() {
+    final text = _ifscCtrl.text.trim().toUpperCase();
+    if (text.length == 11) {
+      if (_ifscDetails?.ifsc != text) {
+        _lookupIfsc(text);
+      }
+    } else {
+      if (_ifscDetails != null) {
+        setState(() {
+          _ifscDetails = null;
+          _bankVerificationResult = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _lookupIfsc(String ifscCode) async {
+    setState(() => _isIfscLoading = true);
+    final result = await RazorpayVerificationService.fetchIfscDetails(ifscCode);
+    if (!mounted) return;
+    setState(() {
+      _isIfscLoading = false;
+      _ifscDetails = result;
+      if (result.isValid && result.bank != null && result.bank!.isNotEmpty) {
+        _selectedBank = result.bank!;
+      }
+    });
+  }
+
+  Future<void> _verifyBankAccountWithRazorpay() async {
+    FocusScope.of(context).unfocus();
+    setState(() => _isVerifyingBank = true);
+
+    final result = await RazorpayVerificationService.verifyBankAccount(
+      accountNumber: _accountNumberCtrl.text,
+      confirmAccountNumber: _confirmAccountCtrl.text,
+      ifsc: _ifscCtrl.text,
+      accountHolderName: _accountHolderCtrl.text,
+      ownerFullName: _ownerNameCtrl.text,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _isVerifyingBank = false;
+      _bankVerificationResult = result;
+      if (result.isVerified && result.bankName != null && result.bankName!.isNotEmpty) {
+        _selectedBank = result.bankName!;
+      }
+    });
+
+    if (result.isVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Expanded(child: Text('Bank Account Verified Successfully')),
+            ],
+          ),
+          backgroundColor: Color(0xFF16A34A),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _saveDraft();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: const Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _checkLostCameraData() async {
+    try {
+      final response = await ImagePickerHelper.retrieveLostData();
+      if (response != null && response.file != null && mounted) {
+        final path = response.file!.path;
+        if (path.isNotEmpty) {
+          setState(() {
+            if (_profilePhotoPath.isEmpty) {
+              _profilePhotoPath = path;
+            }
+          });
+          _saveDraft();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error retrieving lost camera data: $e');
+    }
   }
 
   Future<void> _loadUserMobile() async {
@@ -322,6 +441,10 @@ class _MedicalRegistrationScreenState
 
   @override
   void dispose() {
+    _ifscCtrl.removeListener(_onIfscChanged);
+    _accountNumberCtrl.removeListener(_onAccountDetailsChanged);
+    _confirmAccountCtrl.removeListener(_onAccountDetailsChanged);
+    _accountHolderCtrl.removeListener(_onAccountDetailsChanged);
     _pageController.dispose();
     for (final c in [
       _ownerNameCtrl, _emailCtrl, _passwordCtrl, _confirmPassCtrl,
@@ -657,80 +780,90 @@ class _MedicalRegistrationScreenState
 
   Future<void> _pickImage(
       ImageSource source, ValueChanged<String> onPathUpdated) async {
-    final picker = ImagePicker();
-    final pickedFile =
-        await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
-    if (pickedFile != null) {
+    final path = await ImagePickerHelper.pickImage(
+      source: source,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 75,
+    );
+    if (path != null && path.isNotEmpty) {
       if (!mounted) return;
-      setState(() => onPathUpdated(pickedFile.path));
+      setState(() => onPathUpdated(path));
+      _saveDraft();
     }
   }
 
   Future<void> _pickDocument(ValueChanged<String> onPathUpdated) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'png', 'pdf'],
-    );
-    if (result != null && result.files.single.path != null) {
-      if (!mounted) return;
-      setState(() => onPathUpdated(result.files.single.path!));
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'png', 'pdf'],
+      );
+      if (result != null && result.files.single.path != null) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(result.files.single.path!));
+        _saveDraft();
+      }
+    } catch (e) {
+      debugPrint('[FilePicker] Error: $e');
     }
   }
   
   Future<void> _showImagePickerOptions(
-  ValueChanged<String> onPathUpdated,
-) async {
-  showModalBottomSheet(
-    context: context,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(20),
-      ),
-    ),
-    builder: (_) {
-      return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+    ValueChanged<String> onPathUpdated, {
+    String title = 'Select Image Source',
+  }) async {
+    await ImagePickerHelper.showPickerOptions(
+      context: context,
+      title: title,
+      onImageSelected: (path) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(path));
+        _saveDraft();
+      },
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 75,
+    );
+  }
 
-            ListTile(
-              leading: const Icon(
-                Icons.camera_alt_outlined,
-              ),
-              title: const Text("Take Photo"),
-              onTap: () {
-                Navigator.pop(context);
+  Future<void> _showProfilePhotoPickerOptions(
+    ValueChanged<String> onPathUpdated, {
+    String title = 'Upload Owner Face Photo',
+  }) async {
+    await ImagePickerHelper.showProfilePhotoPickerOptions(
+      context: context,
+      title: title,
+      currentPath: _profilePhotoPath,
+      onRemove: () {
+        setState(() => _profilePhotoPath = '');
+        _saveDraft();
+      },
+      onImageSelected: (path) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(path));
+        _saveDraft();
+      },
+    );
+  }
 
-                _pickImage(
-                  ImageSource.camera,
-                  onPathUpdated,
-                );
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(
-                Icons.photo_library_outlined,
-              ),
-              title: const Text(
-                "Choose From Gallery",
-              ),
-              onTap: () {
-                Navigator.pop(context);
-
-                _pickImage(
-                  ImageSource.gallery,
-                  onPathUpdated,
-                );
-              },
-            ),
-
-          ],
-        ),
-      );
-    },
-  );
-}
+  Future<void> _showDocumentPickerOptions(
+    ValueChanged<String> onPathUpdated, {
+    String title = 'Upload Document / Certificate',
+  }) async {
+    await ImagePickerHelper.showDocumentPickerOptions(
+      context: context,
+      title: title,
+      onFileSelected: (path) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(path));
+        _saveDraft();
+      },
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 75,
+    );
+  }
   // ─────────────────────────────────────────
   // NAVIGATION — WidgetsBinding se jumpToPage call karo
   // ─────────────────────────────────────────
@@ -787,8 +920,21 @@ class _MedicalRegistrationScreenState
       }
     }
 
-    // Step 5 (Bank Details): Cancelled Cheque is Mandatory
+    // Step 5 (Bank Details): Verification with Razorpay & Cancelled Cheque
     if (_currentStep == 5) {
+      if (_bankVerificationResult == null || !_bankVerificationResult!.isVerified) {
+        await _verifyBankAccountWithRazorpay();
+        if (_bankVerificationResult == null || !_bankVerificationResult!.isVerified) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_bankVerificationResult?.message ?? "Please verify your bank account with Razorpay before proceeding"),
+              backgroundColor: const Color(0xFFDC2626),
+            ),
+          );
+          return;
+        }
+      }
+
       if (_cancelledChequePath.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -829,13 +975,36 @@ class _MedicalRegistrationScreenState
             }
           }
 
-          final effectiveUid = user?.uid ?? (await AuthService.getActiveBusinessId()) ?? DateTime.now().millisecondsSinceEpoch.toString();
+          if (user == null) {
+            if (mounted) {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: const Text("Login Required"),
+                  content: const Text("Please log in with your mobile number to complete medical store registration."),
+                  actions: [
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.go('/login');
+                      },
+                      child: const Text("Go to Login"),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return;
+          }
+
+          final effectiveUid = user.uid;
           final storedPhone = await AuthService.getPhoneNumber();
           final effectiveMobile = (storedPhone != null && storedPhone.trim().isNotEmpty)
               ? storedPhone.trim()
               : (_userMobile.isNotEmpty)
                   ? _userMobile
-                  : (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
+                  : (user.phoneNumber != null && user.phoneNumber!.isNotEmpty)
                       ? user.phoneNumber!.replaceAll('+91', '').trim()
                       : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
                           ? widget.prefilledMobile!
@@ -848,7 +1017,7 @@ class _MedicalRegistrationScreenState
                   .collection('businesses')
                   .where('ownerUid', isEqualTo: effectiveUid)
                   .get()
-                  .timeout(const Duration(seconds: 4));
+                  .timeout(const Duration(seconds: 5));
 
               // 1. Check if user already registered a medical store under this account
               final existingMedical = existingSnap.docs.where((d) {
@@ -914,14 +1083,6 @@ class _MedicalRegistrationScreenState
           final businessId = docRef.id;
           _savedBusinessId = businessId;
 
-          // Save local session state immediately so partner is never orphaned
-          final storeName = _medicalNameCtrl.text.trim().isNotEmpty ? _medicalNameCtrl.text.trim() : 'My Medical Store';
-          await AuthService.saveActiveBusinessId(businessId);
-          await AuthService.saveOwnerName(_ownerNameCtrl.text.trim());
-          await AuthService.saveBusinessType('medical');
-          await AuthService.saveStoreName(storeName);
-          await AuthService.saveBusinessStatus('pending');
-
           // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE (IN PARALLEL) ──
           final uploadResults = await Future.wait([
             CloudStorageService.uploadFile(
@@ -945,12 +1106,12 @@ class _MedicalRegistrationScreenState
             ),
             CloudStorageService.uploadFile(
               localPath: _drugLicenseCertPath,
-              destinationPath: 'businesses/$businessId/documents/drug_license_cert',
+              destinationPath: 'businesses/$businessId/documents/drug_license',
               fallback: _drugLicenseCertPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _pharmacistCertPath,
-              destinationPath: 'businesses/$businessId/documents/pharmacist_cert',
+              destinationPath: 'businesses/$businessId/documents/pharmacist_reg',
               fallback: _pharmacistCertPath,
             ),
             CloudStorageService.uploadFile(
@@ -979,112 +1140,226 @@ class _MedicalRegistrationScreenState
           final uploadedLogo = uploadResults[1] as String;
           final uploadedBanner = uploadResults[2] as String;
           final uploadedPhotos = uploadResults[3] as List<String>;
-          final uploadedDrugLicense = uploadResults[4] as String;
-          final uploadedPharmacistCert = uploadResults[5] as String;
+          final uploadedDrug = uploadResults[4] as String;
+          final uploadedPharmacist = uploadResults[5] as String;
           final uploadedGst = uploadResults[6] as String;
           final uploadedPan = uploadResults[7] as String;
           final uploadedAadhaar = uploadResults[8] as String;
           final uploadedCheque = uploadResults[9] as String;
 
           final now = DateTime.now();
-          final formattedDate = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+          final formattedDate = DateFormat('dd MMM yyyy, hh:mm a').format(now);
+          final storeName = _medicalNameCtrl.text.trim().isNotEmpty ? _medicalNameCtrl.text.trim() : 'My Medical Store';
 
           final businessData = {
+            'id': businessId,
             'userId': effectiveUid,
             'ownerUid': effectiveUid,
             'businessType': 'medical',
+            'type': 'medical',
+            'category': 'medical',
             'status': 'pending',
+            'approvalStatus': 'pending',
+            'isApproved': false,
+            'isVerified': false,
             'isLive': false,
+            'isOpen': true,
+            'isActive': true,
             'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
             'publishedAt': FieldValue.serverTimestamp(),
             'publishedDate': formattedDate,
             'registrationDate': formattedDate,
-            'submittedAt': FieldValue.serverTimestamp(),
+            'createdDate': formattedDate,
+            'submittedAt': formattedDate,
             'formPublishDate': formattedDate,
             'agreementAccepted': true,
             'termsAccepted': true,
             'agreementAcceptedAt': FieldValue.serverTimestamp(),
             'agreementStatus': 'accepted',
-            'name': _medicalNameCtrl.text.trim().isNotEmpty ? _medicalNameCtrl.text.trim() : 'My Medical Store',
-            'medicalName': _medicalNameCtrl.text.trim().isNotEmpty ? _medicalNameCtrl.text.trim() : 'My Medical Store',
+
+            // Pharmacy / Medical Store Identity
+            'name': storeName,
+            'medicalName': storeName,
+            'storeName': storeName,
+            'displayName': storeName,
+            'businessName': storeName,
             'address': _medicalAddressCtrl.text.trim(),
             'medicalAddress': _medicalAddressCtrl.text.trim(),
-            'mobile': effectiveMobile,
-            'phoneNumber': effectiveMobile,
-            'ownerPhone': effectiveMobile,
-            'registeredMobile': effectiveMobile,
-            'ownerName': _ownerNameCtrl.text.trim(),
-            'email': _emailCtrl.text.trim(),
-            'altMobile': _altMobileCtrl.text.trim(),
-            'altCountryCode': _altCountryCode,
-            'profilePhotoPath': uploadedProfilePhoto,
+            'storeAddress': _medicalAddressCtrl.text.trim(),
+            'fullAddress': _medicalAddressCtrl.text.trim(),
             'area': _areaCtrl.text.trim(),
             'city': _cityCtrl.text.trim(),
             'state': _stateCtrl.text.trim(),
             'pincode': _pincodeCtrl.text.trim(),
+            'pinCode': _pincodeCtrl.text.trim(),
+            'zipCode': _pincodeCtrl.text.trim(),
             'lat': _latCtrl.text.trim(),
             'lng': _lngCtrl.text.trim(),
             'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
             'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
+            'location': {
+              'address': _medicalAddressCtrl.text.trim(),
+              'area': _areaCtrl.text.trim(),
+              'city': _cityCtrl.text.trim(),
+              'state': _stateCtrl.text.trim(),
+              'pincode': _pincodeCtrl.text.trim(),
+              'lat': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
+              'lng': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
+            },
+
+            // Contact & Owner Details
+            'mobile': effectiveMobile,
+            'phoneNumber': effectiveMobile,
+            'ownerPhone': effectiveMobile,
+            'registeredMobile': effectiveMobile,
+            'contactNumber': effectiveMobile,
+            'ownerName': _ownerNameCtrl.text.trim(),
+            'email': _emailCtrl.text.trim(),
+            'ownerEmail': _emailCtrl.text.trim(),
+            'altMobile': _altMobileCtrl.text.trim(),
+            'altCountryCode': _altCountryCode,
+            'profilePhotoPath': uploadedProfilePhoto,
+            'profilePhoto': uploadedProfilePhoto,
+            'profilePhotoUrl': uploadedProfilePhoto,
+            'avatarUrl': uploadedProfilePhoto,
+
+            // Media & Branding
             'logoUrl': uploadedLogo,
             'medicalLogo': uploadedLogo,
+            'medicalLogoPath': uploadedLogo,
+            'storeLogo': uploadedLogo,
+            'logo': uploadedLogo,
             'bannerUrl': uploadedBanner,
             'medicalBanner': uploadedBanner,
+            'medicalBannerPath': uploadedBanner,
+            'storeBanner': uploadedBanner,
+            'banner': uploadedBanner,
             'medicalPhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _medicalPhotos,
+            'storePhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _medicalPhotos,
+            'photos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _medicalPhotos,
+            'images': uploadedPhotos.isNotEmpty ? uploadedPhotos : _medicalPhotos,
+
+            // Operational Settings
             'categories': _selectedCategories.toList(),
+            'selectedCategories': _selectedCategories.toList(),
             'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
             'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
             'workingDays': _workingDays.toList(),
             'acceptOnlineOrders': _acceptOnlineOrders,
-            'is24HoursOpen': _is24HoursOpen,
-            'isEmergencyMedicine': _isEmergencyMedicine,
-            'drugLicense': _drugLicenseCtrl.text.trim(),
-            'pharmacistReg': _pharmacistRegCtrl.text.trim(),
-            'gstNumber': _gstNumberCtrl.text.trim(),
-            'tradeLicense': _tradeLicenseCtrl.text.trim(),
-            'pan': _panCtrl.text.trim(),
-            'aadhaar': _aadhaarCtrl.text.trim(),
-            'drugLicenseCertPath': uploadedDrugLicense,
-            'pharmacistCertPath': uploadedPharmacistCert,
-            'gstCertPath': uploadedGst,
-            'panDocPath': uploadedPan,
-            'aadhaarDocPath': uploadedAadhaar,
-            'cancelledChequePath': uploadedCheque,
-            'accountHolder': _accountHolderCtrl.text.trim(),
-            'accountNumber': _accountNumberCtrl.text.trim(),
-            'ifsc': _ifscCtrl.text.trim(),
-            'upi': _upiCtrl.text.trim(),
-            'bank': _selectedBank,
             'deliveryOption': _deliveryOption,
+            'deliveryType': _deliveryOption,
             'isPrescriptionRequired': _isPrescriptionRequired,
             'isSameDayDelivery': _isSameDayDelivery,
             'isEmergencyDelivery': _isEmergencyDelivery,
+            'is24HoursOpen': _is24HoursOpen,
+            'isEmergencyMedicine': _isEmergencyMedicine,
             'minOrder': _minOrderCtrl.text.trim(),
             'minOrderAmount': _minOrderCtrl.text.trim(),
             'minimumOrderAmount': _minOrderCtrl.text.trim(),
             'estDelivery': _estDeliveryCtrl.text.trim(),
+            'estDeliveryTime': _estDeliveryCtrl.text.trim(),
             'estimatedDeliveryTime': _estDeliveryCtrl.text.trim(),
+
+            // Legal & Verification Documents
+            'drugLicenseNumber': _drugLicenseCtrl.text.trim(),
+            'drugLicense': _drugLicenseCtrl.text.trim(),
+            'drugLicensePath': uploadedDrug,
+            'drugLicenseCertPath': uploadedDrug,
+            'drugLicenseUrl': uploadedDrug,
+            'drugLicenseCertificate': uploadedDrug,
+
+            'pharmacistRegNumber': _pharmacistRegCtrl.text.trim(),
+            'pharmacistReg': _pharmacistRegCtrl.text.trim(),
+            'pharmacistRegPath': uploadedPharmacist,
+            'pharmacistCertPath': uploadedPharmacist,
+            'pharmacistUrl': uploadedPharmacist,
+            'pharmacistCertificate': uploadedPharmacist,
+
+            'gstNumber': _gstNumberCtrl.text.trim(),
+            'gst': _gstNumberCtrl.text.trim(),
+            'gstCertPath': uploadedGst,
+            'gstUrl': uploadedGst,
+            'gstDocPath': uploadedGst,
+            'gstCertificate': uploadedGst,
+
+            'tradeLicense': _tradeLicenseCtrl.text.trim(),
+            'tradeLicenseNumber': _tradeLicenseCtrl.text.trim(),
+
+            'pan': _panCtrl.text.trim(),
+            'panNumber': _panCtrl.text.trim(),
+            'panDocPath': uploadedPan,
+            'panUrl': uploadedPan,
+
+            'aadhaar': _aadhaarCtrl.text.trim(),
+            'aadhaarNumber': _aadhaarCtrl.text.trim(),
+            'aadhaarDocPath': uploadedAadhaar,
+            'aadhaarUrl': uploadedAadhaar,
+
+            'documents': {
+              'drugLicense': {'number': _drugLicenseCtrl.text.trim(), 'url': uploadedDrug, 'status': 'pending'},
+              'pharmacist': {'number': _pharmacistRegCtrl.text.trim(), 'url': uploadedPharmacist, 'status': 'pending'},
+              'gst': {'number': _gstNumberCtrl.text.trim(), 'url': uploadedGst, 'status': 'pending'},
+              'tradeLicense': {'number': _tradeLicenseCtrl.text.trim(), 'status': 'pending'},
+              'pan': {'number': _panCtrl.text.trim(), 'url': uploadedPan, 'status': 'pending'},
+              'aadhaar': {'number': _aadhaarCtrl.text.trim(), 'url': uploadedAadhaar, 'status': 'pending'},
+              'cancelledCheque': {'url': uploadedCheque, 'status': 'pending'},
+            },
+
+            // Banking & Payout Details (Razorpay ₹1.00 Penny Drop Verification)
+            'accountHolder': _accountHolderCtrl.text.trim(),
+            'accountHolderName': _accountHolderCtrl.text.trim(),
+            'accountNumber': _accountNumberCtrl.text.trim(),
+            'bankAccountNumber': _accountNumberCtrl.text.trim(),
+            'ifsc': _ifscCtrl.text.trim().toUpperCase(),
+            'ifscCode': _ifscCtrl.text.trim().toUpperCase(),
+            'bank': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
+            'bankName': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
+            'bankBranch': _bankVerificationResult?.branch ?? _ifscDetails?.branch ?? '',
+            'cancelledChequePath': uploadedCheque,
+            'cancelledChequeUrl': uploadedCheque,
+            'isBankVerified': _bankVerificationResult?.isVerified ?? false,
+            'bankVerificationId': _bankVerificationResult?.verificationId ?? '',
+            'bankRegisteredName': _bankVerificationResult?.registeredName ?? _accountHolderCtrl.text.trim(),
+            'bankVerificationAmount': 1.00,
+            'bankVerificationMethod': 'razorpay_penny_drop_fav',
+            'bankVerificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
+            'bankVerificationMessage': _bankVerificationResult?.message ?? 'Verified via Razorpay',
+            'bankVerifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+            'bankDetails': {
+              'accountHolder': _accountHolderCtrl.text.trim(),
+              'accountNumber': _accountNumberCtrl.text.trim(),
+              'ifsc': _ifscCtrl.text.trim().toUpperCase(),
+              'bank': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
+              'branch': _bankVerificationResult?.branch ?? _ifscDetails?.branch ?? '',
+              'cancelledCheque': uploadedCheque,
+              'isVerified': _bankVerificationResult?.isVerified ?? false,
+              'verificationId': _bankVerificationResult?.verificationId ?? '',
+              'registeredName': _bankVerificationResult?.registeredName ?? _accountHolderCtrl.text.trim(),
+              'verificationAmount': 1.00,
+              'verificationMethod': 'razorpay_penny_drop_fav',
+              'verificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
+              'verifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+            },
           };
 
-          // Save to Firestore with timeout and background local cache fallback
-          try {
-            await docRef.set(businessData, SetOptions(merge: true)).timeout(const Duration(seconds: 7));
-          } catch (fsError) {
-            debugPrint('Firestore server sync delayed, cached locally: $fsError');
-            docRef.set(businessData, SetOptions(merge: true)).catchError((e) {
-              debugPrint('Background sync error: $e');
-            });
-          }
+          // Save strictly to Firestore
+          await docRef.set(businessData, SetOptions(merge: true));
+
+          // Save local session state only after Firestore successfully persists
+          await AuthService.saveActiveBusinessId(businessId);
+          await AuthService.saveOwnerName(_ownerNameCtrl.text.trim());
+          await AuthService.saveBusinessType('medical');
+          await AuthService.saveStoreName(storeName);
+          await AuthService.saveBusinessStatus('pending');
 
           // Delete draft non-fatally
           try {
-            if (user != null) {
-              await FirebaseFirestore.instance
-                  .collection('registration_drafts')
-                  .doc('${user.uid}_medical')
-                  .delete()
-                  .timeout(const Duration(seconds: 3));
-            }
+            await FirebaseFirestore.instance
+                .collection('registration_drafts')
+                .doc('${user.uid}_medical')
+                .delete()
+                .timeout(const Duration(seconds: 3));
           } catch (e) {
             debugPrint('Draft delete non-fatal note: $e');
           }
@@ -1092,7 +1367,7 @@ class _MedicalRegistrationScreenState
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('🎉 Registration submitted! Opening Dashboard...'),
+                content: Text('🎉 Medical Store registered successfully! Awaiting Admin Approval.'),
                 backgroundColor: Color(0xFF15803D),
                 duration: Duration(seconds: 4),
               ),
@@ -1102,13 +1377,26 @@ class _MedicalRegistrationScreenState
           return;
         } catch (e) {
           debugPrint('Failed to save to Firestore: $e');
-          if (_savedBusinessId != null && mounted) {
-            context.go('/dashboard', extra: _savedBusinessId);
-            return;
-          }
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Failed to save data. Please check internet connection.")),
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: const Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text("Submission Error"),
+                  ],
+                ),
+                content: Text("Could not save your medical store data to Firebase.\n\nError: $e\n\nPlease check your internet connection and try again."),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text("OK"),
+                  ),
+                ],
+              ),
             );
           }
           return;
@@ -1407,12 +1695,25 @@ class _MedicalRegistrationScreenState
       children: [
         _SectionLabel(label: 'Profile Photo (Required) *'),
         Center(
-          child: _ProfilePhotoUpload(
-            path: _profilePhotoPath,
-            onTap: () => _pickImage(
-              ImageSource.gallery,
-              (path) => setState(() => _profilePhotoPath = path),
-            ),
+          child: Column(
+            children: [
+              _ProfilePhotoUpload(
+                path: _profilePhotoPath,
+                onTap: () => _showProfilePhotoPickerOptions(
+                  (path) => setState(() => _profilePhotoPath = path),
+                  title: 'Upload Owner Face Photo',
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Take selfie or upload a clear photo of the owner\'s face',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: kTextSecondary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 24),
@@ -1828,8 +2129,10 @@ class _MedicalRegistrationScreenState
           label: 'Drug License Certificate',
           required: true,
           filePath: _drugLicenseCertPath,
-          onTap: () => _pickDocument(
-              (path) => setState(() => _drugLicenseCertPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _drugLicenseCertPath = path),
+            title: 'Upload Drug License Certificate',
+          ),
           accepts: 'PDF, JPG, PNG',
         ),
         const SizedBox(height: 20),
@@ -1854,8 +2157,10 @@ class _MedicalRegistrationScreenState
           label: 'Pharmacist Certificate',
           required: true,
           filePath: _pharmacistCertPath,
-          onTap: () => _pickDocument(
-              (path) => setState(() => _pharmacistCertPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _pharmacistCertPath = path),
+            title: 'Upload Pharmacist Certificate',
+          ),
           accepts: 'PDF, JPG, PNG',
         ),
         const SizedBox(height: 20),
@@ -1878,8 +2183,10 @@ class _MedicalRegistrationScreenState
         UploadCard(
           label: 'GST Certificate',
           filePath: _gstCertPath,
-          onTap: () =>
-              _pickDocument((path) => setState(() => _gstCertPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _gstCertPath = path),
+            title: 'Upload GST Certificate',
+          ),
           accepts: 'PDF, JPG, PNG',
         ),
         const SizedBox(height: 20),
@@ -1912,8 +2219,10 @@ class _MedicalRegistrationScreenState
           label: 'PAN Card',
           required: true,
           filePath: _panDocPath,
-          onTap: () =>
-              _pickDocument((path) => setState(() => _panDocPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _panDocPath = path),
+            title: 'Upload PAN Card',
+          ),
           accepts: 'JPG, PNG, PDF',
         ),
         const SizedBox(height: 12),
@@ -1940,8 +2249,10 @@ class _MedicalRegistrationScreenState
           label: 'Aadhaar Card (Front & Back)',
           required: true,
           filePath: _aadhaarDocPath,
-          onTap: () =>
-              _pickDocument((path) => setState(() => _aadhaarDocPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _aadhaarDocPath = path),
+            title: 'Upload Aadhaar Card',
+          ),
           accepts: 'JPG, PNG, PDF',
         ),
         const SizedBox(height: 8),
@@ -1970,11 +2281,6 @@ class _MedicalRegistrationScreenState
           prefixIcon: Icons.person_outline,
         ),
         const SizedBox(height: 16),
-        _BankSelectorField(
-          selected: _selectedBank,
-          onSelect: (v) => setState(() => _selectedBank = v),
-        ),
-        const SizedBox(height: 16),
         CustomTextField(
           controller: _accountNumberCtrl,
           label: 'Account Number',
@@ -1993,7 +2299,6 @@ class _MedicalRegistrationScreenState
           prefixIcon: Icons.numbers_outlined,
           keyboardType: TextInputType.number,
           validator: (value) {
-
             if (value == null || value.isEmpty) {
               return 'Confirm account number required';
             }
@@ -2017,7 +2322,6 @@ class _MedicalRegistrationScreenState
             FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
           ],
           validator: (value) {
-
             if (value == null || value.isEmpty) return 'IFSC Code required';
             final ifscRegex = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
             if (!ifscRegex.hasMatch(value.toUpperCase())) {
@@ -2026,23 +2330,29 @@ class _MedicalRegistrationScreenState
             return null;
           },
         ),
-        const SizedBox(height: 16),
-        CustomTextField(
-          controller: _upiCtrl,
-          label: 'UPI ID',
-          hint: 'e.g. name@upi or mobile@paytm',
-          required: true,
-          prefixIcon: Icons.qr_code_outlined,
-          keyboardType: TextInputType.emailAddress,
+        IfscBranchBanner(
+          ifscDetails: _ifscDetails,
+          isLoading: _isIfscLoading,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        BankVerificationCard(
+          ifscDetails: _ifscDetails,
+          isIfscLoading: _isIfscLoading,
+          verificationResult: _bankVerificationResult,
+          isVerifyingBank: _isVerifyingBank,
+          attemptCount: RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
+          onVerifyTap: _verifyBankAccountWithRazorpay,
+        ),
+        const SizedBox(height: 12),
         _SectionLabel(label: 'Cancelled Cheque / Passbook *'),
         UploadCard(
           label: 'Upload Cancelled Cheque / Passbook',
           required: true,
           filePath: _cancelledChequePath,
-          onTap: () => _pickDocument(
-              (path) => setState(() => _cancelledChequePath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _cancelledChequePath = path),
+            title: 'Upload Cancelled Cheque / Passbook',
+          ),
           accepts: 'JPG, PNG, PDF',
         ),
         const SizedBox(height: 8),
@@ -2894,43 +3204,55 @@ class _ProfilePhotoUpload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageProvider = getSafeImageProvider(path);
-    final uploaded = path.trim().isNotEmpty && imageProvider != null;
+    final uploaded = path.trim().isNotEmpty && getSafeImageProvider(path) != null;
     return GestureDetector(
       onTap: onTap,
       child: Stack(
         children: [
           Container(
-            width: 90,
-            height: 90,
+            width: 100,
+            height: 100,
             decoration: BoxDecoration(
               color: uploaded ? kBlueAccent : kOffWhite,
               shape: BoxShape.circle,
               border: Border.all(
-                  color: uploaded ? kNavyBlue : kBorderColor, width: 2),
-              image: uploaded
-                  ? DecorationImage(
-                      image: imageProvider!, fit: BoxFit.cover)
-                  : null,
+                  color: uploaded ? kNavyBlue : kBorderColor, width: 2.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            child: !uploaded
-                ? const Icon(Icons.person_outline,
-                    color: kTextHint, size: 44)
-                : null,
+            child: ClipOval(
+              child: uploaded
+                  ? SafeImageWidget(
+                      imagePath: path,
+                      width: 100,
+                      height: 100,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                      errorWidget: const Icon(Icons.person_outline,
+                          color: kTextHint, size: 50),
+                    )
+                  : const Icon(Icons.person_outline,
+                      color: kTextHint, size: 50),
+            ),
           ),
           Positioned(
             right: 0,
             bottom: 0,
             child: Container(
-              width: 28,
-              height: 28,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 color: kNavyBlue,
                 shape: BoxShape.circle,
                 border: Border.all(color: kWhite, width: 2),
               ),
               child:
-                  const Icon(Icons.camera_alt, color: kWhite, size: 14),
+                  const Icon(Icons.camera_alt, color: kWhite, size: 16),
             ),
           ),
         ],
@@ -3238,14 +3560,12 @@ class _UploadBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageProvider = getSafeImageProvider(imagePath);
-    final uploaded = imagePath.trim().isNotEmpty && imageProvider != null;
+    final uploaded = imagePath.trim().isNotEmpty && getSafeImageProvider(imagePath) != null;
     return SizedBox(
       height: 95,
       child: AspectRatio(
         aspectRatio: aspectRatio,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+        child: Container(
           decoration: BoxDecoration(
             color: uploaded ? kBlueAccent : kWhite,
             borderRadius: BorderRadius.circular(12),
@@ -3254,14 +3574,36 @@ class _UploadBox extends StatelessWidget {
               style: BorderStyle.solid,
               width: uploaded ? 1.5 : 1,
             ),
-            image: uploaded
-                ? DecorationImage(
-                    image: imageProvider!,
-                    fit: BoxFit.cover)
-                : null,
           ),
-          child: !uploaded
-              ? Column(
+          child: uploaded
+              ? Stack(
+                  children: [
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(11),
+                        child: SafeImageWidget(
+                          imagePath: imagePath,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6.0),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                              color: Colors.white70,
+                              shape: BoxShape.circle),
+                          child: const Icon(Icons.edit,
+                              size: 16, color: kNavyBlue),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(icon, color: kNavyBlue, size: 26),
@@ -3277,20 +3619,6 @@ class _UploadBox extends StatelessWidget {
                         style: TextStyle(
                             color: kTextHint, fontSize: 10.5)),
                   ],
-                )
-              : Align(
-                  alignment: Alignment.topRight,
-                  child: Padding(
-                    padding: const EdgeInsets.all(6.0),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                          color: Colors.white70,
-                          shape: BoxShape.circle),
-                      child: const Icon(Icons.edit,
-                          size: 16, color: kNavyBlue),
-                    ),
-                  ),
                 ),
         ),
       ),
@@ -3333,7 +3661,7 @@ class _MultiPhotoUpload extends StatelessWidget {
                   Icon(Icons.add_a_photo_outlined,
                       color: kNavyBlue, size: 22),
                   SizedBox(height: 6),
-                  Text('Camera',
+                  Text('Photo',
                       style: TextStyle(
                           color: kNavyBlue,
                           fontSize: 10.5,
@@ -3352,14 +3680,18 @@ class _MultiPhotoUpload extends StatelessWidget {
                 color: kBlueAccent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: kNavyBlue.withOpacity(0.4)),
-                image: getSafeImageProvider(photos[i]) != null
-                    ? DecorationImage(
-                        image: getSafeImageProvider(photos[i])!,
-                        fit: BoxFit.cover)
-                    : null,
               ),
               child: Stack(
                 children: [
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(9),
+                      child: SafeImageWidget(
+                        imagePath: photos[i],
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
                   Positioned(
                     top: 4,
                     right: 4,

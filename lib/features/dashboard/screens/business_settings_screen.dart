@@ -29,6 +29,7 @@ import 'document_manage_page.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/utils/image_picker_helper.dart';
 import '../../../models/business_model.dart';
 
 import '../../auth/screens/grocery_registration_screen.dart';
@@ -552,16 +553,21 @@ class _UpdateImagesSheetState extends State<_UpdateImagesSheet> {
   Future<void> _fromSource(ImageSource source, String type, BuildContext sheetCtx) async {
     Navigator.pop(sheetCtx);
     try {
-      final XFile? picked = await _picker.pickImage(source: source, imageQuality: 85, maxWidth: 1200, maxHeight: 1200);
-      if (picked != null) {
+      final String? pickedPath = await ImagePickerHelper.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 75,
+      );
+      if (pickedPath != null && pickedPath.isNotEmpty) {
         if (!mounted) return;
         setState(() {
           if (type == 'banner') {
-            _banner = File(picked.path);
+            _banner = File(pickedPath);
           } else if (type == 'logo') {
-            _logo = File(picked.path);
+            _logo = File(pickedPath);
           } else {
-            _profilePhoto = File(picked.path);
+            _profilePhoto = File(pickedPath);
           }
         });
       }

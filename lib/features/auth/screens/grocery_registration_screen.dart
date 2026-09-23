@@ -25,6 +25,9 @@ import '../widgets/mapbox_location_picker.dart';
 import '../../../core/utils/safe_image_provider.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/cloud_storage_service.dart';
+import '../../../core/utils/image_picker_helper.dart';
+import '../../../core/services/razorpay_verification_service.dart';
+import '../widgets/bank_verification_card.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:intl/intl.dart';
 
@@ -133,6 +136,10 @@ class _GroceryRegistrationScreenState
   final _upiCtrl             = TextEditingController();
   String _selectedBank       = '';
   String _cancelledChequePath = '';
+  IfscDetailsResult? _ifscDetails;
+  bool _isIfscLoading = false;
+  BankVerificationResult? _bankVerificationResult;
+  bool _isVerifyingBank = false;
 
   // ── Step 7 ──
   String _deliveryOption     = 'cartkaro';
@@ -146,8 +153,120 @@ class _GroceryRegistrationScreenState
   @override
   void initState() {
     super.initState();
+    _ifscCtrl.addListener(_onIfscChanged);
+    _accountNumberCtrl.addListener(_onAccountDetailsChanged);
+    _confirmAccountCtrl.addListener(_onAccountDetailsChanged);
+    _accountHolderCtrl.addListener(_onAccountDetailsChanged);
+    _checkLostCameraData();
     _loadUserMobile();
     _loadDraft();
+  }
+
+  void _onAccountDetailsChanged() {
+    if (_bankVerificationResult != null) {
+      if (_bankVerificationResult!.accountNumber != _accountNumberCtrl.text.trim() ||
+          _bankVerificationResult!.ifsc != _ifscCtrl.text.trim().toUpperCase() ||
+          _bankVerificationResult!.registeredName != _accountHolderCtrl.text.trim().toUpperCase()) {
+        setState(() {
+          _bankVerificationResult = null;
+        });
+      }
+    }
+  }
+
+  void _onIfscChanged() {
+    final text = _ifscCtrl.text.trim().toUpperCase();
+    if (text.length == 11) {
+      if (_ifscDetails?.ifsc != text) {
+        _lookupIfsc(text);
+      }
+    } else {
+      if (_ifscDetails != null) {
+        setState(() {
+          _ifscDetails = null;
+          _bankVerificationResult = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _lookupIfsc(String ifscCode) async {
+    setState(() => _isIfscLoading = true);
+    final result = await RazorpayVerificationService.fetchIfscDetails(ifscCode);
+    if (!mounted) return;
+    setState(() {
+      _isIfscLoading = false;
+      _ifscDetails = result;
+      if (result.isValid && result.bank != null && result.bank!.isNotEmpty) {
+        _selectedBank = result.bank!;
+      }
+    });
+  }
+
+  Future<void> _verifyBankAccountWithRazorpay() async {
+    FocusScope.of(context).unfocus();
+    setState(() => _isVerifyingBank = true);
+
+    final result = await RazorpayVerificationService.verifyBankAccount(
+      accountNumber: _accountNumberCtrl.text,
+      confirmAccountNumber: _confirmAccountCtrl.text,
+      ifsc: _ifscCtrl.text,
+      accountHolderName: _accountHolderCtrl.text,
+      ownerFullName: _ownerNameCtrl.text,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _isVerifyingBank = false;
+      _bankVerificationResult = result;
+      if (result.isVerified && result.bankName != null && result.bankName!.isNotEmpty) {
+        _selectedBank = result.bankName!;
+      }
+    });
+
+    if (result.isVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Expanded(child: Text('Bank Account Verified Successfully')),
+            ],
+          ),
+          backgroundColor: Color(0xFF16A34A),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _saveDraft();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: const Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _checkLostCameraData() async {
+    try {
+      final response = await ImagePickerHelper.retrieveLostData();
+      if (response != null && response.file != null && mounted) {
+        final path = response.file!.path;
+        if (path.isNotEmpty) {
+          setState(() {
+            if (_profilePhotoPath.isEmpty) {
+              _profilePhotoPath = path;
+            }
+          });
+          _saveDraft();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error retrieving lost camera data: $e');
+    }
   }
 
   Future<void> _loadUserMobile() async {
@@ -307,6 +426,10 @@ class _GroceryRegistrationScreenState
 
   @override
   void dispose() {
+    _ifscCtrl.removeListener(_onIfscChanged);
+    _accountNumberCtrl.removeListener(_onAccountDetailsChanged);
+    _confirmAccountCtrl.removeListener(_onAccountDetailsChanged);
+    _accountHolderCtrl.removeListener(_onAccountDetailsChanged);
     _pageController.dispose();
     for (final c in [
       _ownerNameCtrl, _emailCtrl, _passwordCtrl, _confirmPassCtrl,
@@ -640,80 +763,90 @@ class _GroceryRegistrationScreenState
 
   Future<void> _pickImage(
       ImageSource source, ValueChanged<String> onPathUpdated) async {
-    final picker = ImagePicker();
-    final pickedFile =
-        await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1200, maxHeight: 1200);
-    if (pickedFile != null) {
+    final path = await ImagePickerHelper.pickImage(
+      source: source,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 75,
+    );
+    if (path != null && path.isNotEmpty) {
       if (!mounted) return;
-      setState(() => onPathUpdated(pickedFile.path));
+      setState(() => onPathUpdated(path));
+      _saveDraft();
     }
   }
 
   Future<void> _pickDocument(ValueChanged<String> onPathUpdated) async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'png', 'pdf'],
-    );
-    if (result != null && result.files.single.path != null) {
-      if (!mounted) return;
-      setState(() => onPathUpdated(result.files.single.path!));
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'png', 'pdf'],
+      );
+      if (result != null && result.files.single.path != null) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(result.files.single.path!));
+        _saveDraft();
+      }
+    } catch (e) {
+      debugPrint('[FilePicker] Error: $e');
     }
   }
 
   Future<void> _showImagePickerOptions(
-  ValueChanged<String> onPathUpdated,
-) async {
-  showModalBottomSheet(
-    context: context,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(20),
-      ),
-    ),
-    builder: (_) {
-      return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+    ValueChanged<String> onPathUpdated, {
+    String title = 'Select Image Source',
+  }) async {
+    await ImagePickerHelper.showPickerOptions(
+      context: context,
+      title: title,
+      onImageSelected: (path) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(path));
+        _saveDraft();
+      },
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 75,
+    );
+  }
 
-            ListTile(
-              leading: const Icon(
-                Icons.camera_alt_outlined,
-              ),
-              title: const Text("Take Photo"),
-              onTap: () {
-                Navigator.pop(context);
+  Future<void> _showProfilePhotoPickerOptions(
+    ValueChanged<String> onPathUpdated, {
+    String title = 'Upload Owner Face Photo',
+  }) async {
+    await ImagePickerHelper.showProfilePhotoPickerOptions(
+      context: context,
+      title: title,
+      currentPath: _profilePhotoPath,
+      onRemove: () {
+        setState(() => _profilePhotoPath = '');
+        _saveDraft();
+      },
+      onImageSelected: (path) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(path));
+        _saveDraft();
+      },
+    );
+  }
 
-                _pickImage(
-                  ImageSource.camera,
-                  onPathUpdated,
-                );
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(
-                Icons.photo_library_outlined,
-              ),
-              title: const Text(
-                "Choose From Gallery",
-              ),
-              onTap: () {
-                Navigator.pop(context);
-
-                _pickImage(
-                  ImageSource.gallery,
-                  onPathUpdated,
-                );
-              },
-            ),
-
-          ],
-        ),
-      );
-    },
-  );
-}
+  Future<void> _showDocumentPickerOptions(
+    ValueChanged<String> onPathUpdated, {
+    String title = 'Upload Document / Certificate',
+  }) async {
+    await ImagePickerHelper.showDocumentPickerOptions(
+      context: context,
+      title: title,
+      onFileSelected: (path) {
+        if (!mounted) return;
+        setState(() => onPathUpdated(path));
+        _saveDraft();
+      },
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 75,
+    );
+  }
   // ─────────────────────────────────────────
   // FIX 1: NAVIGATION — WidgetsBinding se jumpToPage call karo
   // ─────────────────────────────────────────
@@ -770,8 +903,21 @@ class _GroceryRegistrationScreenState
       }
     }
 
-    // Step 5 (Step 6 in UI - Bank Details): Cancelled Cheque is Mandatory
+    // Step 5 (Step 6 in UI - Bank Details): Verification with Razorpay & Cancelled Cheque
     if (_currentStep == 5) {
+      if (_bankVerificationResult == null || !_bankVerificationResult!.isVerified) {
+        await _verifyBankAccountWithRazorpay();
+        if (_bankVerificationResult == null || !_bankVerificationResult!.isVerified) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_bankVerificationResult?.message ?? "Please verify your bank account with Razorpay before proceeding"),
+              backgroundColor: const Color(0xFFDC2626),
+            ),
+          );
+          return;
+        }
+      }
+
       if (_cancelledChequePath.trim().isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -812,12 +958,35 @@ class _GroceryRegistrationScreenState
             }
           }
 
-          final effectiveUid = user?.uid ?? (await AuthService.getActiveBusinessId()) ?? DateTime.now().millisecondsSinceEpoch.toString();
+          if (user == null) {
+            if (mounted) {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: const Text("Login Required"),
+                  content: const Text("Please log in with your mobile number to complete business registration."),
+                  actions: [
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.go('/login');
+                      },
+                      child: const Text("Go to Login"),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return;
+          }
+
+          final effectiveUid = user.uid;
           final effectiveMobile = _userMobile.isNotEmpty
               ? _userMobile
               : (widget.prefilledMobile != null && widget.prefilledMobile!.isNotEmpty)
                   ? widget.prefilledMobile!
-                  : (user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty)
+                  : (user.phoneNumber != null && user.phoneNumber!.isNotEmpty)
                       ? user.phoneNumber!.replaceAll('+91', '').trim()
                       : (_altMobileCtrl.text.trim().isNotEmpty ? _altMobileCtrl.text.trim() : '5555555555');
 
@@ -828,7 +997,7 @@ class _GroceryRegistrationScreenState
                   .collection('businesses')
                   .where('ownerUid', isEqualTo: effectiveUid)
                   .get()
-                  .timeout(const Duration(seconds: 4));
+                  .timeout(const Duration(seconds: 5));
 
               // 1. Check if user already registered a grocery store under this account
               final existingGrocery = existingSnap.docs.where((d) {
@@ -893,14 +1062,6 @@ class _GroceryRegistrationScreenState
           final docRef = FirebaseFirestore.instance.collection('businesses').doc();
           final businessId = docRef.id;
           _savedBusinessId = businessId;
-
-          // Save local session state immediately so partner is never orphaned
-          final storeName = _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store';
-          await AuthService.saveActiveBusinessId(businessId);
-          await AuthService.saveOwnerName(_ownerNameCtrl.text.trim());
-          await AuthService.saveBusinessType('grocery');
-          await AuthService.saveStoreName(storeName);
-          await AuthService.saveBusinessStatus('pending');
 
           // ── UPLOAD GENUINE IMAGES & DOCUMENTS TO FIREBASE CLOUD STORAGE IN PARALLEL ──
           final uploadResults = await Future.wait([
@@ -968,113 +1129,239 @@ class _GroceryRegistrationScreenState
 
           final now = DateTime.now();
           final formattedDate = DateFormat('dd MMM yyyy, hh:mm a').format(now);
+          final storeName = _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store';
 
           final businessData = {
+            'id': businessId,
             'userId': effectiveUid,
             'ownerUid': effectiveUid,
             'businessType': 'grocery',
+            'type': 'grocery',
+            'category': 'grocery',
             'status': 'pending',
+            'approvalStatus': 'pending',
+            'isApproved': false,
+            'isVerified': false,
             'isLive': false,
+            'isOpen': true,
+            'isActive': true,
             'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
             'publishedAt': FieldValue.serverTimestamp(),
             'publishedDate': formattedDate,
             'registrationDate': formattedDate,
+            'createdDate': formattedDate,
             'submittedAt': formattedDate,
             'formPublishDate': formattedDate,
             'agreementAccepted': true,
             'termsAccepted': true,
             'agreementAcceptedAt': FieldValue.serverTimestamp(),
             'agreementStatus': 'accepted',
-            'name': _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store',
-            'storeName': _storeNameCtrl.text.trim().isNotEmpty ? _storeNameCtrl.text.trim() : 'My Grocery Store',
+
+            // Store Identity
+            'name': storeName,
+            'storeName': storeName,
+            'displayName': storeName,
+            'businessName': storeName,
             'address': _storeAddressCtrl.text.trim(),
             'storeAddress': _storeAddressCtrl.text.trim(),
-            'mobile': effectiveMobile,
-            'phoneNumber': effectiveMobile,
-            'ownerPhone': effectiveMobile,
-            'registeredMobile': effectiveMobile,
-            'ownerName': _ownerNameCtrl.text.trim(),
-            'email': _emailCtrl.text.trim(),
-            'altMobile': _altMobileCtrl.text.trim(),
-            'altCountryCode': _altCountryCode,
-            'profilePhotoPath': uploadedProfilePhoto,
+            'fullAddress': _storeAddressCtrl.text.trim(),
             'area': _areaCtrl.text.trim(),
             'city': _cityCtrl.text.trim(),
             'state': _stateCtrl.text.trim(),
             'pincode': _pincodeCtrl.text.trim(),
+            'pinCode': _pincodeCtrl.text.trim(),
+            'zipCode': _pincodeCtrl.text.trim(),
             'lat': _latCtrl.text.trim(),
             'lng': _lngCtrl.text.trim(),
             'latitude': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
             'longitude': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
+            'location': {
+              'address': _storeAddressCtrl.text.trim(),
+              'area': _areaCtrl.text.trim(),
+              'city': _cityCtrl.text.trim(),
+              'state': _stateCtrl.text.trim(),
+              'pincode': _pincodeCtrl.text.trim(),
+              'lat': double.tryParse(_latCtrl.text.trim()) ?? 0.0,
+              'lng': double.tryParse(_lngCtrl.text.trim()) ?? 0.0,
+            },
+
+            // Contact & Owner Details
+            'mobile': effectiveMobile,
+            'phoneNumber': effectiveMobile,
+            'ownerPhone': effectiveMobile,
+            'registeredMobile': effectiveMobile,
+            'contactNumber': effectiveMobile,
+            'ownerName': _ownerNameCtrl.text.trim(),
+            'email': _emailCtrl.text.trim(),
+            'ownerEmail': _emailCtrl.text.trim(),
+            'altMobile': _altMobileCtrl.text.trim(),
+            'altCountryCode': _altCountryCode,
+            'profilePhotoPath': uploadedProfilePhoto,
+            'profilePhoto': uploadedProfilePhoto,
+            'profilePhotoUrl': uploadedProfilePhoto,
+            'avatarUrl': uploadedProfilePhoto,
+
+            // Media & Branding
             'logoUrl': uploadedLogo,
+            'storeLogo': uploadedLogo,
             'storeLogoPath': uploadedLogo,
+            'logo': uploadedLogo,
             'bannerUrl': uploadedBanner,
+            'storeBanner': uploadedBanner,
             'storeBannerPath': uploadedBanner,
+            'banner': uploadedBanner,
             'storePhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _storePhotos,
+            'photos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _storePhotos,
+            'images': uploadedPhotos.isNotEmpty ? uploadedPhotos : _storePhotos,
+
+            // Operational Settings
             'categories': _selectedCategories.toList(),
+            'selectedCategories': _selectedCategories.toList(),
             'openingTime': '${_openingTime.hour}:${_openingTime.minute}',
             'closingTime': '${_closingTime.hour}:${_closingTime.minute}',
             'workingDays': _workingDays.toList(),
             'acceptOnlineOrders': _acceptOnlineOrders,
-            'fssaiNumber': _fssaiNumberCtrl.text.trim(),
-            'gstNumber': _gstNumberCtrl.text.trim(),
-            'tradeLicense': _tradeLicenseCtrl.text.trim(),
-            'pan': _panCtrl.text.trim(),
-            'aadhaar': _aadhaarCtrl.text.trim(),
-            'fssaiCertPath': uploadedFssai,
-            'gstCertPath': uploadedGst,
-            'tradeLicensePath': uploadedTrade,
-            'panDocPath': uploadedPan,
-            'aadhaarDocPath': uploadedAadhaar,
-            'accountHolder': _accountHolderCtrl.text.trim(),
-            'accountNumber': _accountNumberCtrl.text.trim(),
-            'ifsc': _ifscCtrl.text.trim(),
-            'upi': _upiCtrl.text.trim(),
-            'bank': _selectedBank,
-            'cancelledChequePath': uploadedCheque,
             'deliveryOption': _deliveryOption,
+            'deliveryType': _deliveryOption,
             'minOrder': _minOrderCtrl.text.trim(),
             'minOrderAmount': _minOrderCtrl.text.trim(),
+            'minimumOrderAmount': _minOrderCtrl.text.trim(),
             'estDelivery': _estDeliveryCtrl.text.trim(),
             'estDeliveryTime': _estDeliveryCtrl.text.trim(),
+            'estimatedDeliveryTime': _estDeliveryCtrl.text.trim(),
+
+            // Legal & Verification Documents
+            'fssaiNumber': _fssaiNumberCtrl.text.trim(),
+            'fssai': _fssaiNumberCtrl.text.trim(),
+            'fssaiCertPath': uploadedFssai,
+            'fssaiUrl': uploadedFssai,
+            'fssaiDocPath': uploadedFssai,
+            'fssaiCertificate': uploadedFssai,
+
+            'gstNumber': _gstNumberCtrl.text.trim(),
+            'gst': _gstNumberCtrl.text.trim(),
+            'gstCertPath': uploadedGst,
+            'gstUrl': uploadedGst,
+            'gstDocPath': uploadedGst,
+            'gstCertificate': uploadedGst,
+
+            'tradeLicense': _tradeLicenseCtrl.text.trim(),
+            'tradeLicenseNumber': _tradeLicenseCtrl.text.trim(),
+            'tradeLicensePath': uploadedTrade,
+            'tradeLicenseUrl': uploadedTrade,
+            'tradeLicenseDocPath': uploadedTrade,
+
+            'pan': _panCtrl.text.trim(),
+            'panNumber': _panCtrl.text.trim(),
+            'panDocPath': uploadedPan,
+            'panUrl': uploadedPan,
+
+            'aadhaar': _aadhaarCtrl.text.trim(),
+            'aadhaarNumber': _aadhaarCtrl.text.trim(),
+            'aadhaarDocPath': uploadedAadhaar,
+            'aadhaarUrl': uploadedAadhaar,
+
+            'documents': {
+              'fssai': {'number': _fssaiNumberCtrl.text.trim(), 'url': uploadedFssai, 'status': 'pending'},
+              'gst': {'number': _gstNumberCtrl.text.trim(), 'url': uploadedGst, 'status': 'pending'},
+              'tradeLicense': {'number': _tradeLicenseCtrl.text.trim(), 'url': uploadedTrade, 'status': 'pending'},
+              'pan': {'number': _panCtrl.text.trim(), 'url': uploadedPan, 'status': 'pending'},
+              'aadhaar': {'number': _aadhaarCtrl.text.trim(), 'url': uploadedAadhaar, 'status': 'pending'},
+              'cancelledCheque': {'url': uploadedCheque, 'status': 'pending'},
+            },
+
+            // Banking & Payout Details (Razorpay ₹1.00 Penny Drop Verification)
+            'accountHolder': _accountHolderCtrl.text.trim(),
+            'accountHolderName': _accountHolderCtrl.text.trim(),
+            'accountNumber': _accountNumberCtrl.text.trim(),
+            'bankAccountNumber': _accountNumberCtrl.text.trim(),
+            'ifsc': _ifscCtrl.text.trim().toUpperCase(),
+            'ifscCode': _ifscCtrl.text.trim().toUpperCase(),
+            'bank': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
+            'bankName': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
+            'bankBranch': _bankVerificationResult?.branch ?? _ifscDetails?.branch ?? '',
+            'cancelledChequePath': uploadedCheque,
+            'cancelledChequeUrl': uploadedCheque,
+            'isBankVerified': _bankVerificationResult?.isVerified ?? false,
+            'bankVerificationId': _bankVerificationResult?.verificationId ?? '',
+            'bankRegisteredName': _bankVerificationResult?.registeredName ?? _accountHolderCtrl.text.trim(),
+            'bankVerificationAmount': 1.00,
+            'bankVerificationMethod': 'razorpay_penny_drop_fav',
+            'bankVerificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
+            'bankVerificationMessage': _bankVerificationResult?.message ?? 'Verified via Razorpay',
+            'bankVerifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+            'bankDetails': {
+              'accountHolder': _accountHolderCtrl.text.trim(),
+              'accountNumber': _accountNumberCtrl.text.trim(),
+              'ifsc': _ifscCtrl.text.trim().toUpperCase(),
+              'bank': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
+              'branch': _bankVerificationResult?.branch ?? _ifscDetails?.branch ?? '',
+              'cancelledCheque': uploadedCheque,
+              'isVerified': _bankVerificationResult?.isVerified ?? false,
+              'verificationId': _bankVerificationResult?.verificationId ?? '',
+              'registeredName': _bankVerificationResult?.registeredName ?? _accountHolderCtrl.text.trim(),
+              'verificationAmount': 1.00,
+              'verificationMethod': 'razorpay_penny_drop_fav',
+              'verificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
+              'verifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+            },
           };
 
-          // Save to Firestore with timeout and background local cache fallback
-          try {
-            await docRef.set(businessData, SetOptions(merge: true)).timeout(const Duration(seconds: 7));
-          } catch (fsError) {
-            debugPrint('Firestore server sync delayed, cached locally: $fsError');
-            docRef.set(businessData, SetOptions(merge: true)).catchError((e) {
-              debugPrint('Background sync error: $e');
-            });
-          }
+          // Save strictly to Firestore
+          await docRef.set(businessData, SetOptions(merge: true));
+
+          // Save local session state only after Firestore successfully persists
+          await AuthService.saveActiveBusinessId(businessId);
+          await AuthService.saveOwnerName(_ownerNameCtrl.text.trim());
+          await AuthService.saveBusinessType('grocery');
+          await AuthService.saveStoreName(storeName);
+          await AuthService.saveBusinessStatus('pending');
 
           // Delete draft non-fatally
           try {
-            if (user != null) {
-              await FirebaseFirestore.instance
-                  .collection('registration_drafts')
-                  .doc('${user.uid}_grocery')
-                  .delete()
-                  .timeout(const Duration(seconds: 3));
-            }
+            await FirebaseFirestore.instance
+                .collection('registration_drafts')
+                .doc('${user.uid}_grocery')
+                .delete()
+                .timeout(const Duration(seconds: 3));
           } catch (e) {
             debugPrint('Draft delete non-fatal note: $e');
           }
 
           if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🎉 Grocery Store registered successfully! Awaiting Admin Approval.'),
+                backgroundColor: Color(0xFF059669),
+                duration: Duration(seconds: 4),
+              ),
+            );
             context.go('/dashboard', extra: businessId);
           }
           return;
         } catch (e) {
           debugPrint('Failed to save to Firestore: $e');
-          if (_savedBusinessId != null && mounted) {
-            context.go('/dashboard', extra: _savedBusinessId);
-            return;
-          }
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Failed to save data. Please check internet connection.")),
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: const Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text("Submission Error"),
+                  ],
+                ),
+                content: Text("Could not save your store data to Firebase.\n\nError: $e\n\nPlease check your internet connection and try again."),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text("OK"),
+                  ),
+                ],
+              ),
             );
           }
           return;
@@ -1380,12 +1667,25 @@ class _GroceryRegistrationScreenState
       children: [
         _SectionLabel(label: 'Profile Photo (Required) *'),
         Center(
-          child: _ProfilePhotoUpload(
-            path: _profilePhotoPath,
-            onTap: () => _pickImage(
-              ImageSource.gallery,
-              (path) => setState(() => _profilePhotoPath = path),
-            ),
+          child: Column(
+            children: [
+              _ProfilePhotoUpload(
+                path: _profilePhotoPath,
+                onTap: () => _showProfilePhotoPickerOptions(
+                  (path) => setState(() => _profilePhotoPath = path),
+                  title: 'Upload Owner Face Photo',
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Take selfie or upload a clear photo of the owner\'s face',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: kTextSecondary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 24),
@@ -1795,7 +2095,10 @@ class _GroceryRegistrationScreenState
           label: 'FSSAI Certificate',
           required: true,
           filePath: _fssaiCertPath,
-          onTap: () => _pickDocument((path) => setState(() => _fssaiCertPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _fssaiCertPath = path),
+            title: 'Upload FSSAI Certificate',
+          ),
           accepts: 'PDF, JPG, PNG',
         ),
         const SizedBox(height: 20),
@@ -1820,7 +2123,10 @@ class _GroceryRegistrationScreenState
         UploadCard(
           label: 'GST Certificate',
           filePath: _gstCertPath,
-          onTap: () => _pickDocument((path) => setState(() => _gstCertPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _gstCertPath = path),
+            title: 'Upload GST Certificate',
+          ),
           accepts: 'PDF, JPG, PNG',
         ),
         const SizedBox(height: 20),
@@ -1835,8 +2141,10 @@ class _GroceryRegistrationScreenState
         UploadCard(
           label: 'Trade License Document',
           filePath: _tradeLicensePath,
-          onTap: () =>
-              _pickDocument((path) => setState(() => _tradeLicensePath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _tradeLicensePath = path),
+            title: 'Upload Trade License',
+          ),
           accepts: 'PDF, JPG, PNG',
         ),
         const SizedBox(height: 20),
@@ -1863,7 +2171,10 @@ class _GroceryRegistrationScreenState
           label: 'PAN Card',
           required: true,
           filePath: _panDocPath,
-          onTap: () => _pickDocument((path) => setState(() => _panDocPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _panDocPath = path),
+            title: 'Upload PAN Card',
+          ),
           accepts: 'JPG, PNG, PDF',
         ),
         const SizedBox(height: 12),
@@ -1890,8 +2201,10 @@ class _GroceryRegistrationScreenState
           label: 'Aadhaar Card (Front & Back)',
           required: true,
           filePath: _aadhaarDocPath,
-          onTap: () =>
-              _pickDocument((path) => setState(() => _aadhaarDocPath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _aadhaarDocPath = path),
+            title: 'Upload Aadhaar Card',
+          ),
           accepts: 'JPG, PNG, PDF',
         ),
         const SizedBox(height: 8),
@@ -1921,11 +2234,6 @@ class _GroceryRegistrationScreenState
           prefixIcon: Icons.person_outline,
         ),
         const SizedBox(height: 16),
-        _BankSelectorField(
-          selected: _selectedBank,
-          onSelect: (v) => setState(() => _selectedBank = v),
-        ),
-        const SizedBox(height: 16),
         CustomTextField(
           controller: _accountNumberCtrl,
           label: 'Account Number',
@@ -1936,7 +2244,7 @@ class _GroceryRegistrationScreenState
           obscureText: true,
         ),
         const SizedBox(height: 16),
-        // ✅ FIX 3A: Account number match validation
+        // Account number match validation
         CustomTextField(
           controller: _confirmAccountCtrl,
           label: 'Confirm Account Number',
@@ -1945,7 +2253,6 @@ class _GroceryRegistrationScreenState
           prefixIcon: Icons.numbers_outlined,
           keyboardType: TextInputType.number,
           validator: (value) {
-
             if (value == null || value.isEmpty) {
               return 'Confirm account number required';
             }
@@ -1956,7 +2263,7 @@ class _GroceryRegistrationScreenState
           },
         ),
         const SizedBox(height: 16),
-        // ✅ FIX 3B: IFSC format validation — 4 letters + 0 + 6 alphanumeric
+        // IFSC format validation
         CustomTextField(
           controller: _ifscCtrl,
           label: 'IFSC Code',
@@ -1970,7 +2277,6 @@ class _GroceryRegistrationScreenState
             FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
           ],
           validator: (value) {
-
             if (value == null || value.isEmpty) return 'IFSC Code required';
             final ifscRegex = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
             if (!ifscRegex.hasMatch(value.toUpperCase())) {
@@ -1979,23 +2285,29 @@ class _GroceryRegistrationScreenState
             return null;
           },
         ),
-        const SizedBox(height: 16),
-        CustomTextField(
-          controller: _upiCtrl,
-          label: 'UPI ID',
-          hint: 'e.g. name@upi or mobile@paytm',
-          required: true,
-          prefixIcon: Icons.qr_code_outlined,
-          keyboardType: TextInputType.emailAddress,
+        IfscBranchBanner(
+          ifscDetails: _ifscDetails,
+          isLoading: _isIfscLoading,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        BankVerificationCard(
+          ifscDetails: _ifscDetails,
+          isIfscLoading: _isIfscLoading,
+          verificationResult: _bankVerificationResult,
+          isVerifyingBank: _isVerifyingBank,
+          attemptCount: RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
+          onVerifyTap: _verifyBankAccountWithRazorpay,
+        ),
+        const SizedBox(height: 12),
         _SectionLabel(label: 'Cancelled Cheque / Passbook *'),
         UploadCard(
           label: 'Upload Cancelled Cheque / Passbook',
           required: true,
           filePath: _cancelledChequePath,
-          onTap: () => _pickDocument(
-              (path) => setState(() => _cancelledChequePath = path)),
+          onTap: () => _showDocumentPickerOptions(
+            (path) => setState(() => _cancelledChequePath = path),
+            title: 'Upload Cancelled Cheque / Passbook',
+          ),
           accepts: 'JPG, PNG, PDF',
         ),
         const SizedBox(height: 8),
@@ -2885,47 +3197,57 @@ class _ProfilePhotoUpload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageProvider = getSafeImageProvider(path);
-    final uploaded = path.trim().isNotEmpty && imageProvider != null;
+    final uploaded = path.trim().isNotEmpty && getSafeImageProvider(path) != null;
     return GestureDetector(
       onTap: onTap,
       child: Stack(
         children: [
           Container(
-            width: 90,
-            height: 90,
+            width: 100,
+            height: 100,
             decoration: BoxDecoration(
               color: uploaded ? kBlueAccent : kOffWhite,
               shape: BoxShape.circle,
               border: Border.all(
                 color: uploaded ? kNavyBlue : kBorderColor,
-                width: 2,
+                width: 2.5,
               ),
-              image: uploaded
-                  ? DecorationImage(
-                      image: imageProvider!,
-                      fit: BoxFit.cover,
-                    )
-                  : null,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            child: !uploaded
-                ? const Icon(Icons.person_outline,
-                    color: kTextHint, size: 44)
-                : null,
+            child: ClipOval(
+              child: uploaded
+                  ? SafeImageWidget(
+                      imagePath: path,
+                      width: 100,
+                      height: 100,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                      errorWidget: const Icon(Icons.person_outline,
+                          color: kTextHint, size: 50),
+                    )
+                  : const Icon(Icons.person_outline,
+                      color: kTextHint, size: 50),
+            ),
           ),
           Positioned(
             right: 0,
             bottom: 0,
             child: Container(
-              width: 28,
-              height: 28,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 color: kNavyBlue,
                 shape: BoxShape.circle,
                 border: Border.all(color: kWhite, width: 2),
               ),
               child: const Icon(Icons.camera_alt,
-                  color: kWhite, size: 14),
+                  color: kWhite, size: 16),
             ),
           ),
         ],
@@ -3273,14 +3595,12 @@ class _UploadBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageProvider = getSafeImageProvider(imagePath);
-    final uploaded = imagePath.trim().isNotEmpty && imageProvider != null;
+    final uploaded = imagePath.trim().isNotEmpty && getSafeImageProvider(imagePath) != null;
     return SizedBox(
       height: 95,
       child: AspectRatio(
         aspectRatio: aspectRatio,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+        child: Container(
           decoration: BoxDecoration(
             color: uploaded ? kBlueAccent : kWhite,
             borderRadius: BorderRadius.circular(12),
@@ -3289,15 +3609,37 @@ class _UploadBox extends StatelessWidget {
               style: BorderStyle.solid,
               width: uploaded ? 1.5 : 1,
             ),
-            image: uploaded
-                ? DecorationImage(
-                    image: imageProvider!,
-                    fit: BoxFit.cover,
-                  )
-                : null,
           ),
-          child: !uploaded
-              ? Column(
+          child: uploaded
+              ? Stack(
+                  children: [
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(11),
+                        child: SafeImageWidget(
+                          imagePath: imagePath,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6.0),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.white70,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.edit,
+                              size: 16, color: kNavyBlue),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(icon, color: kNavyBlue, size: 26),
@@ -3318,21 +3660,6 @@ class _UploadBox extends StatelessWidget {
                           color: kTextHint, fontSize: 10.5),
                     ),
                   ],
-                )
-              : Align(
-                  alignment: Alignment.topRight,
-                  child: Padding(
-                    padding: const EdgeInsets.all(6.0),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.white70,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.edit,
-                          size: 16, color: kNavyBlue),
-                    ),
-                  ),
                 ),
         ),
       ),
@@ -3379,7 +3706,7 @@ class _MultiPhotoUpload extends StatelessWidget {
                       color: kNavyBlue, size: 22),
                   SizedBox(height: 6),
                   Text(
-                    'Camera',
+                    'Photo',
                     style: TextStyle(
                       color: kNavyBlue,
                       fontSize: 10.5,
@@ -3401,15 +3728,18 @@ class _MultiPhotoUpload extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                     color: kNavyBlue.withValues(alpha: 0.4)),
-                image: getSafeImageProvider(photos[i]) != null
-                    ? DecorationImage(
-                        image: getSafeImageProvider(photos[i])!,
-                        fit: BoxFit.cover,
-                      )
-                    : null,
               ),
               child: Stack(
                 children: [
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(9),
+                      child: SafeImageWidget(
+                        imagePath: photos[i],
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
                   Positioned(
                     top: 4,
                     right: 4,
