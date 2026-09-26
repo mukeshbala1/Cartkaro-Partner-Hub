@@ -1029,17 +1029,14 @@ class _RestaurantRegistrationScreenState
             CloudStorageService.uploadFile(
               localPath: _profilePhotoPath,
               destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
-              fallback: _profilePhotoPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _restaurantLogoPath,
               destinationPath: 'businesses/$businessId/branding/logo.jpg',
-              fallback: _restaurantLogoPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _restaurantBannerPath,
               destinationPath: 'businesses/$businessId/branding/banner.jpg',
-              fallback: _restaurantBannerPath,
             ),
             CloudStorageService.uploadMultipleFiles(
               localPaths: _restaurantPhotos,
@@ -1048,32 +1045,26 @@ class _RestaurantRegistrationScreenState
             CloudStorageService.uploadFile(
               localPath: _fssaiCertPath,
               destinationPath: 'businesses/$businessId/documents/fssai_cert',
-              fallback: _fssaiCertPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _gstCertPath,
               destinationPath: 'businesses/$businessId/documents/gst_cert',
-              fallback: _gstCertPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _tradeLicensePath,
               destinationPath: 'businesses/$businessId/documents/trade_license',
-              fallback: _tradeLicensePath,
             ),
             CloudStorageService.uploadFile(
               localPath: _panDocPath,
               destinationPath: 'businesses/$businessId/documents/pan_doc',
-              fallback: _panDocPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _aadhaarDocPath,
               destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
-              fallback: _aadhaarDocPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _cancelledChequePath,
               destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
-              fallback: _cancelledChequePath,
             ),
           ]);
 
@@ -1087,6 +1078,10 @@ class _RestaurantRegistrationScreenState
           final uploadedPan = uploadResults[7] as String;
           final uploadedAadhaar = uploadResults[8] as String;
           final uploadedCheque = uploadResults[9] as String;
+
+          final safePhotosList = uploadedPhotos.isNotEmpty
+              ? uploadedPhotos
+              : _restaurantPhotos.where((p) => !CloudStorageService.isLocalFilePath(p)).toList();
 
           final now = DateTime.now();
           final formattedDate = DateFormat('dd MMM yyyy, hh:mm a').format(now);
@@ -1160,23 +1155,17 @@ class _RestaurantRegistrationScreenState
             'ownerEmail': _emailCtrl.text.trim(),
             'altMobile': _altMobileCtrl.text.trim(),
             'altCountryCode': _altCountryCode,
-            'profilePhotoPath': uploadedProfilePhoto,
             'profilePhoto': uploadedProfilePhoto,
             'profilePhotoUrl': uploadedProfilePhoto,
-            'avatarUrl': uploadedProfilePhoto,
+            'profilePhotoPath': uploadedProfilePhoto,
 
             // Media & Branding
             'logoUrl': uploadedLogo,
             'restaurantLogo': uploadedLogo,
-            'restaurantLogoPath': uploadedLogo,
-            'logo': uploadedLogo,
             'bannerUrl': uploadedBanner,
             'restaurantBanner': uploadedBanner,
-            'restaurantBannerPath': uploadedBanner,
-            'banner': uploadedBanner,
-            'restaurantPhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _restaurantPhotos,
-            'photos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _restaurantPhotos,
-            'images': uploadedPhotos.isNotEmpty ? uploadedPhotos : _restaurantPhotos,
+            'restaurantPhotos': safePhotosList,
+            'photos': safePhotosList,
 
             // Operational Settings
             'categories': _selectedCategories.toList(),
@@ -1201,34 +1190,24 @@ class _RestaurantRegistrationScreenState
 
             // Legal & Verification Documents
             'fssaiNumber': _fssaiNumberCtrl.text.trim(),
-            'fssai': _fssaiNumberCtrl.text.trim(),
-            'fssaiCertPath': uploadedFssai,
             'fssaiUrl': uploadedFssai,
-            'fssaiDocPath': uploadedFssai,
-            'fssaiCertificate': uploadedFssai,
 
             'gstNumber': _gstNumberCtrl.text.trim(),
-            'gst': _gstNumberCtrl.text.trim(),
-            'gstCertPath': uploadedGst,
             'gstUrl': uploadedGst,
-            'gstDocPath': uploadedGst,
-            'gstCertificate': uploadedGst,
 
             'tradeLicense': _tradeLicenseCtrl.text.trim(),
             'tradeLicenseNumber': _tradeLicenseCtrl.text.trim(),
-            'tradeLicensePath': uploadedTrade,
             'tradeLicenseUrl': uploadedTrade,
-            'tradeLicenseDocPath': uploadedTrade,
 
             'pan': _panCtrl.text.trim(),
             'panNumber': _panCtrl.text.trim(),
-            'panDocPath': uploadedPan,
             'panUrl': uploadedPan,
 
             'aadhaar': _aadhaarCtrl.text.trim(),
             'aadhaarNumber': _aadhaarCtrl.text.trim(),
-            'aadhaarDocPath': uploadedAadhaar,
             'aadhaarUrl': uploadedAadhaar,
+
+            'cancelledChequeUrl': uploadedCheque,
 
             'documents': {
               'fssai': {'number': _fssaiNumberCtrl.text.trim(), 'url': uploadedFssai, 'status': 'pending'},
@@ -1249,8 +1228,6 @@ class _RestaurantRegistrationScreenState
             'bank': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
             'bankName': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
             'bankBranch': _bankVerificationResult?.branch ?? _ifscDetails?.branch ?? '',
-            'cancelledChequePath': uploadedCheque,
-            'cancelledChequeUrl': uploadedCheque,
             'isBankVerified': _bankVerificationResult?.isVerified ?? false,
             'bankVerificationId': _bankVerificationResult?.verificationId ?? '',
             'bankRegisteredName': _bankVerificationResult?.registeredName ?? _accountHolderCtrl.text.trim(),
@@ -1258,7 +1235,8 @@ class _RestaurantRegistrationScreenState
             'bankVerificationMethod': 'razorpay_penny_drop_fav',
             'bankVerificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
             'bankVerificationMessage': _bankVerificationResult?.message ?? 'Verified via Razorpay',
-            'bankVerifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+            if (_bankVerificationResult != null && (_bankVerificationResult?.isVerified ?? false))
+              'bankVerifiedAt': FieldValue.serverTimestamp(),
             'bankDetails': {
               'accountHolder': _accountHolderCtrl.text.trim(),
               'accountNumber': _accountNumberCtrl.text.trim(),
@@ -1272,12 +1250,23 @@ class _RestaurantRegistrationScreenState
               'verificationAmount': 1.00,
               'verificationMethod': 'razorpay_penny_drop_fav',
               'verificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
-              'verifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+              if (_bankVerificationResult != null && (_bankVerificationResult?.isVerified ?? false))
+                'verifiedAt': DateTime.now().toIso8601String(),
             },
           };
 
-          // Save strictly to Firestore
-          await docRef.set(businessData, SetOptions(merge: true));
+          // Sanitize payload to strip nulls and ensure Firestore argument validity
+          final sanitizedBusinessData = CloudStorageService.sanitizeMap(businessData);
+
+          // Pre-flight document size check (Firestore hard limit: 1,048,576 bytes)
+          final estimatedSize = CloudStorageService.estimateDocumentSize(sanitizedBusinessData);
+          debugPrint('[RestaurantReg] Estimated Firestore document size: $estimatedSize bytes');
+          if (estimatedSize > 900000) {
+            debugPrint('[RestaurantReg] WARNING: Document size $estimatedSize bytes is near 1 MiB Firestore limit!');
+          }
+
+          // Save to Firestore
+          await docRef.set(sanitizedBusinessData);
 
           // Save local session state only after Firestore successfully persists
           await AuthService.saveActiveBusinessId(businessId);

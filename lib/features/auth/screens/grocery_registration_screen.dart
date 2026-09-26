@@ -1068,17 +1068,14 @@ class _GroceryRegistrationScreenState
             CloudStorageService.uploadFile(
               localPath: _profilePhotoPath,
               destinationPath: 'businesses/$businessId/branding/profile_photo.jpg',
-              fallback: _profilePhotoPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _storeLogoPath,
               destinationPath: 'businesses/$businessId/branding/logo.jpg',
-              fallback: _storeLogoPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _storeBannerPath,
               destinationPath: 'businesses/$businessId/branding/banner.jpg',
-              fallback: _storeBannerPath,
             ),
             CloudStorageService.uploadMultipleFiles(
               localPaths: _storePhotos,
@@ -1087,32 +1084,26 @@ class _GroceryRegistrationScreenState
             CloudStorageService.uploadFile(
               localPath: _fssaiCertPath,
               destinationPath: 'businesses/$businessId/documents/fssai_cert',
-              fallback: _fssaiCertPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _gstCertPath,
               destinationPath: 'businesses/$businessId/documents/gst_cert',
-              fallback: _gstCertPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _tradeLicensePath,
               destinationPath: 'businesses/$businessId/documents/trade_license',
-              fallback: _tradeLicensePath,
             ),
             CloudStorageService.uploadFile(
               localPath: _panDocPath,
               destinationPath: 'businesses/$businessId/documents/pan_doc',
-              fallback: _panDocPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _aadhaarDocPath,
               destinationPath: 'businesses/$businessId/documents/aadhaar_doc',
-              fallback: _aadhaarDocPath,
             ),
             CloudStorageService.uploadFile(
               localPath: _cancelledChequePath,
               destinationPath: 'businesses/$businessId/documents/cancelled_cheque',
-              fallback: _cancelledChequePath,
             ),
           ]);
 
@@ -1126,6 +1117,10 @@ class _GroceryRegistrationScreenState
           final uploadedPan = uploadResults[7] as String;
           final uploadedAadhaar = uploadResults[8] as String;
           final uploadedCheque = uploadResults[9] as String;
+
+          final safePhotosList = uploadedPhotos.isNotEmpty
+              ? uploadedPhotos
+              : _storePhotos.where((p) => !CloudStorageService.isLocalFilePath(p)).toList();
 
           final now = DateTime.now();
           final formattedDate = DateFormat('dd MMM yyyy, hh:mm a').format(now);
@@ -1197,23 +1192,17 @@ class _GroceryRegistrationScreenState
             'ownerEmail': _emailCtrl.text.trim(),
             'altMobile': _altMobileCtrl.text.trim(),
             'altCountryCode': _altCountryCode,
-            'profilePhotoPath': uploadedProfilePhoto,
             'profilePhoto': uploadedProfilePhoto,
             'profilePhotoUrl': uploadedProfilePhoto,
-            'avatarUrl': uploadedProfilePhoto,
+            'profilePhotoPath': uploadedProfilePhoto,
 
             // Media & Branding
             'logoUrl': uploadedLogo,
             'storeLogo': uploadedLogo,
-            'storeLogoPath': uploadedLogo,
-            'logo': uploadedLogo,
             'bannerUrl': uploadedBanner,
             'storeBanner': uploadedBanner,
-            'storeBannerPath': uploadedBanner,
-            'banner': uploadedBanner,
-            'storePhotos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _storePhotos,
-            'photos': uploadedPhotos.isNotEmpty ? uploadedPhotos : _storePhotos,
-            'images': uploadedPhotos.isNotEmpty ? uploadedPhotos : _storePhotos,
+            'storePhotos': safePhotosList,
+            'photos': safePhotosList,
 
             // Operational Settings
             'categories': _selectedCategories.toList(),
@@ -1233,34 +1222,24 @@ class _GroceryRegistrationScreenState
 
             // Legal & Verification Documents
             'fssaiNumber': _fssaiNumberCtrl.text.trim(),
-            'fssai': _fssaiNumberCtrl.text.trim(),
-            'fssaiCertPath': uploadedFssai,
             'fssaiUrl': uploadedFssai,
-            'fssaiDocPath': uploadedFssai,
-            'fssaiCertificate': uploadedFssai,
 
             'gstNumber': _gstNumberCtrl.text.trim(),
-            'gst': _gstNumberCtrl.text.trim(),
-            'gstCertPath': uploadedGst,
             'gstUrl': uploadedGst,
-            'gstDocPath': uploadedGst,
-            'gstCertificate': uploadedGst,
 
             'tradeLicense': _tradeLicenseCtrl.text.trim(),
             'tradeLicenseNumber': _tradeLicenseCtrl.text.trim(),
-            'tradeLicensePath': uploadedTrade,
             'tradeLicenseUrl': uploadedTrade,
-            'tradeLicenseDocPath': uploadedTrade,
 
             'pan': _panCtrl.text.trim(),
             'panNumber': _panCtrl.text.trim(),
-            'panDocPath': uploadedPan,
             'panUrl': uploadedPan,
 
             'aadhaar': _aadhaarCtrl.text.trim(),
             'aadhaarNumber': _aadhaarCtrl.text.trim(),
-            'aadhaarDocPath': uploadedAadhaar,
             'aadhaarUrl': uploadedAadhaar,
+
+            'cancelledChequeUrl': uploadedCheque,
 
             'documents': {
               'fssai': {'number': _fssaiNumberCtrl.text.trim(), 'url': uploadedFssai, 'status': 'pending'},
@@ -1281,8 +1260,6 @@ class _GroceryRegistrationScreenState
             'bank': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
             'bankName': _bankVerificationResult?.bankName ?? _ifscDetails?.bank ?? _selectedBank,
             'bankBranch': _bankVerificationResult?.branch ?? _ifscDetails?.branch ?? '',
-            'cancelledChequePath': uploadedCheque,
-            'cancelledChequeUrl': uploadedCheque,
             'isBankVerified': _bankVerificationResult?.isVerified ?? false,
             'bankVerificationId': _bankVerificationResult?.verificationId ?? '',
             'bankRegisteredName': _bankVerificationResult?.registeredName ?? _accountHolderCtrl.text.trim(),
@@ -1290,7 +1267,8 @@ class _GroceryRegistrationScreenState
             'bankVerificationMethod': 'razorpay_penny_drop_fav',
             'bankVerificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
             'bankVerificationMessage': _bankVerificationResult?.message ?? 'Verified via Razorpay',
-            'bankVerifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+            if (_bankVerificationResult != null && (_bankVerificationResult?.isVerified ?? false))
+              'bankVerifiedAt': FieldValue.serverTimestamp(),
             'bankDetails': {
               'accountHolder': _accountHolderCtrl.text.trim(),
               'accountNumber': _accountNumberCtrl.text.trim(),
@@ -1304,12 +1282,23 @@ class _GroceryRegistrationScreenState
               'verificationAmount': 1.00,
               'verificationMethod': 'razorpay_penny_drop_fav',
               'verificationAttempts': _bankVerificationResult?.attemptsUsed ?? RazorpayVerificationService.getAttempts(_accountNumberCtrl.text),
-              'verifiedAt': _bankVerificationResult != null ? FieldValue.serverTimestamp() : null,
+              if (_bankVerificationResult != null && (_bankVerificationResult?.isVerified ?? false))
+                'verifiedAt': DateTime.now().toIso8601String(),
             },
           };
 
-          // Save strictly to Firestore
-          await docRef.set(businessData, SetOptions(merge: true));
+          // Sanitize payload to strip nulls and ensure Firestore argument validity
+          final sanitizedBusinessData = CloudStorageService.sanitizeMap(businessData);
+
+          // Pre-flight document size check (Firestore hard limit: 1,048,576 bytes)
+          final estimatedSize = CloudStorageService.estimateDocumentSize(sanitizedBusinessData);
+          debugPrint('[GroceryReg] Estimated Firestore document size: $estimatedSize bytes');
+          if (estimatedSize > 900000) {
+            debugPrint('[GroceryReg] WARNING: Document size $estimatedSize bytes is dangerously close to 1 MiB Firestore limit!');
+          }
+
+          // Save to Firestore
+          await docRef.set(sanitizedBusinessData);
 
           // Save local session state only after Firestore successfully persists
           await AuthService.saveActiveBusinessId(businessId);
@@ -1341,7 +1330,18 @@ class _GroceryRegistrationScreenState
           }
           return;
         } catch (e) {
-          debugPrint('Failed to save to Firestore: $e');
+          debugPrint('[GroceryReg] Firestore write failed: $e');
+          final errMsg = e.toString();
+          String userMessage;
+          if (errMsg.contains('invalid-argument')) {
+            userMessage = 'Firestore rejected the data (invalid-argument).\n\nThis usually means a field contained an unsupported value type. Our sanitization should have caught this — please contact support with the error below.\n\nError: $e';
+          } else if (errMsg.contains('permission-denied')) {
+            userMessage = 'Firebase permission denied. Please ensure you are logged in and your Firebase Security Rules allow writes to the businesses collection.';
+          } else if (errMsg.contains('network') || errMsg.contains('unavailable')) {
+            userMessage = 'Network error. Please check your internet connection and try again.';
+          } else {
+            userMessage = 'Could not save your store data to Firebase.\n\nError: $e\n\nPlease check your internet connection and try again.';
+          }
           if (mounted) {
             showDialog(
               context: context,
@@ -1351,10 +1351,10 @@ class _GroceryRegistrationScreenState
                   children: [
                     Icon(Icons.error_outline, color: Colors.red),
                     SizedBox(width: 8),
-                    Text("Submission Error"),
+                    Expanded(child: Text("Submission Error")),
                   ],
                 ),
-                content: Text("Could not save your store data to Firebase.\n\nError: $e\n\nPlease check your internet connection and try again."),
+                content: SingleChildScrollView(child: Text(userMessage)),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),

@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../../../core/utils/image_picker_helper.dart';
+import '../../../core/services/cloud_storage_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/business_model.dart';
 
 enum _DocAction { upload, update }
@@ -287,22 +289,43 @@ class _DocumentManagePageState extends State<DocumentManagePage> {
 
     setState(() {
       _processingDoc = doc.name;
-      _business = _business.copyWith(
-        documents: _business.documents.map((d) {
-          return d.name == doc.name
-              ? d.copyWith(status: "pending", filePath: filePath)
-              : d;
-        }).toList(),
-      );
-      _hasChanges = true;
     });
 
-    await Future.delayed(const Duration(seconds: 2));
-    final ok = true; // In a real app, update via API/Firestore
+    try {
+      final docKey = doc.name.toLowerCase().replaceAll(' ', '_').replaceAll('/', '_');
+      final uploadedUrl = await CloudStorageService.uploadFile(
+        localPath: filePath,
+        destinationPath: 'businesses/${_business.id}/documents/${docKey}_${DateTime.now().millisecondsSinceEpoch}',
+      );
 
-    if (!mounted) return;
+      final finalUrl = uploadedUrl.isNotEmpty ? uploadedUrl : filePath;
 
-    if (!ok) {
+      if (_business.id.isNotEmpty) {
+        await FirebaseFirestore.instance.collection('businesses').doc(_business.id).update({
+          'documents.$docKey.url': finalUrl,
+          'documents.$docKey.status': 'pending',
+          'documents.$docKey.updatedAt': FieldValue.serverTimestamp(),
+          '${docKey}DocPath': finalUrl,
+          '${docKey}Url': finalUrl,
+        });
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _business = _business.copyWith(
+          documents: _business.documents.map((d) {
+            return d.name == doc.name
+                ? d.copyWith(status: "pending", filePath: finalUrl)
+                : d;
+          }).toList(),
+        );
+        _hasChanges = true;
+        _processingDoc = null;
+      });
+      _toast("${doc.name} submitted for verification");
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _business = _business.copyWith(
           documents: _business.documents.map((d) {
@@ -311,14 +334,8 @@ class _DocumentManagePageState extends State<DocumentManagePage> {
         );
         _processingDoc = null;
       });
-      _toast("Upload failed");
-      return;
+      _toast("Upload failed: $e");
     }
-
-    setState(() {
-      _processingDoc = null;
-    });
-    _toast("${doc.name} submitted for verification");
   }
 
   // ------------------------------------------------

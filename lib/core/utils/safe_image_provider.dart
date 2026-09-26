@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,12 @@ ImageProvider? getSafeImageProvider(String? path, {ImageProvider? fallback}) {
   }
   if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
     return NetworkImage(cleanPath);
+  }
+  if (cleanPath.startsWith('data:image/')) {
+    try {
+      final base64String = cleanPath.split(',').last;
+      return MemoryImage(base64Decode(base64String));
+    } catch (_) {}
   }
   if (cleanPath.startsWith('blob:')) {
     if (kIsWeb) {
@@ -119,6 +126,26 @@ class SafeImageWidget extends StatelessWidget {
       );
     }
 
+    if (path.startsWith('data:image/')) {
+      try {
+        final base64String = path.split(',').last;
+        final bytes = base64Decode(base64String);
+        return Image.memory(
+          bytes,
+          key: imageKey,
+          width: width,
+          height: height,
+          fit: fit,
+          alignment: alignment,
+          cacheWidth: effectiveCacheWidth,
+          cacheHeight: effectiveCacheHeight,
+          errorBuilder: (context, error, stackTrace) => defaultFallback,
+        );
+      } catch (_) {
+        return defaultFallback;
+      }
+    }
+
     if (path.startsWith('blob:')) {
       if (kIsWeb) {
         return Image.network(
@@ -162,4 +189,3 @@ class SafeImageWidget extends StatelessWidget {
     return defaultFallback;
   }
 }
-
